@@ -62,10 +62,10 @@ void identity(const pipkin::State& state, uint64_t now) {
     const int count =
         std::snprintf(reply, sizeof(reply),
                       "v=1 kind=identity product=pipkin firmware=%s chip=esp32 board=%s "
-                      "hardware=unconfirmed protocol_min=1 protocol_max=1 seq=%" PRIu64
+                      "hardware=%s protocol_min=1 protocol_max=1 seq=%" PRIu64
                       " clock_epoch=%" PRIu64 " unix=%s\n",
-                      esp_app_get_description()->version, board::kProfile, state.last_sequence,
-                      state.clock.observation_epoch, unix_time);
+                      esp_app_get_description()->version, board::kProfile, board::kHardware,
+                      state.last_sequence, state.clock.observation_epoch, unix_time);
     if (count > 0 && count < static_cast<int>(sizeof(reply))) {
         ESP_ERROR_CHECK(uart_write_bytes(UART_NUM_0, reply, count) == count ? ESP_OK : ESP_FAIL);
     }

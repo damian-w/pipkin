@@ -1,0 +1,78 @@
+name: Board support
+description: Share a CYD identification report so we can review another board variant.
+title: "[Board support] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Connect one board and run `pipkin identify --issue` with Pipkin CLI 1.4.0 or later.
+        Add `--port PORT` if multiple serial devices are connected.
+        This checks the chip, flash and running firmware without writing firmware or settings;
+        it can briefly restart the board. The shareable report omits unit identifiers and local paths.
+        PCB markings and display/touch observations help distinguish boards that share the same electronics.
+  - type: textarea
+    id: identify_report
+    attributes:
+      label: Identification report
+      description: Paste the complete output from `pipkin identify --issue`.
+      placeholder: Paste the shareable report here.
+    validations:
+      required: true
+  - type: textarea
+    id: physical_markings
+    attributes:
+      label: PCB and module markings
+      description: Copy the printed PCB model, revision and ESP module markings. Say "unknown" for unreadable or missing markings.
+      placeholder: |
+        PCB model and revision:
+        ESP module markings:
+        Display or ribbon cable markings:
+    validations:
+      required: true
+  - type: textarea
+    id: connectors
+    attributes:
+      label: USB connectors
+      description: List the connector types fitted to the board and which connector you used for this report.
+      placeholder: "Example: USB-C and micro-USB; connected through USB-C."
+    validations:
+      required: true
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display operation
+      description: Choose what you have observed on this physical board.
+      options:
+        - Not tested
+        - Works with Pipkin (orientation, colors and backlight)
+        - Works with other firmware only
+        - Display has problems
+    validations:
+      required: true
+  - type: dropdown
+    id: touch
+    attributes:
+      label: Touch operation
+      description: Choose what you have observed on this physical board.
+      options:
+        - Not tested
+        - Works with Pipkin (touch and page selection)
+        - Works with other firmware only
+        - Touch has problems
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Functional checks and firmware version
+      description: Include the firmware version used, any display or touch problems, and whether you tested first installation, an update, or reconnecting USB. Leave untested behavior explicit.
+  - type: textarea
+    id: photos
+    attributes:
+      label: Board photographs
+      description: If available, attach clear front/back photos, module markings and display labels. You can drag images into this field. Avoid including unit MAC addresses, USB serial numbers or personal details.
+  - type: input
+    id: supplier
+    attributes:
+      label: Purchase or supplier URL
+      description: Optional source information to help distinguish variants; a seller listing does not establish compatibility.

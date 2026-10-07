@@ -38,8 +38,8 @@ v=1 kind=identify
 ```
 
 Its response includes `v=1 kind=identity product=pipkin`, firmware version,
-board identity, the last accepted `seq`, current `clock_epoch`, and the device's
-current `unix` time, or `null` before clock synchronization. A lower `seq` than
+compiled firmware board profile, the last accepted `seq`, current `clock_epoch`,
+and the device's current `unix` time, or `null` before clock synchronization. A lower `seq` than
 a sender last used indicates the device restarted and lost volatile state.
 Identity replies do not authorize flashing; this protocol has no firmware-update
 or rollback commands.

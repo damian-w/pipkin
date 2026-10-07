@@ -28,13 +28,13 @@ def esp_image(payload):
     return data + hashlib.sha256(data).digest()
 
 
-def application(version="1.0.0", revision=REVISION):
+def application(version="1.0.0", revision=REVISION, board="esp32-2432s028r"):
     description = bytearray(256)
     struct.pack_into("<I", description, 0, 0xABCD5432)
     description[16:48] = version.encode().ljust(32, b"\0")
     description[48:80] = b"pipkin".ljust(32, b"\0")
     description[112:144] = b"v5.4.2".ljust(32, b"\0")
-    return esp_image(bytes(description) + revision[:12].encode() + b"\0")
+    return esp_image(bytes(description) + revision[:12].encode() + b"\0" + board.encode() + b"\0")
 
 
 def partition_table(nvs_offset=0x9000, flags=0):
@@ -101,9 +101,9 @@ class PackagingTest(unittest.TestCase):
         manifest = self.package()
         self.assertEqual(manifest["source_revision"], REVISION)
         self.assertEqual(manifest["version"], "1.0.0")
-        self.assertEqual(manifest["board"], "esp32-2432s028r-provisional")
-        self.assertEqual(manifest["hardware"], "unconfirmed")
-        self.assertEqual(manifest["minimum_cli"], "1.1.0")
+        self.assertEqual(manifest["board"], "esp32-2432s028r")
+        self.assertEqual(manifest["hardware"], "confirmed")
+        self.assertEqual(manifest["minimum_cli"], "1.4.0")
         self.assertEqual([image["offset"] for image in manifest["images"]], [0x1000, 0x8000, 0x10000])
         self.assertEqual([image["role"] for image in manifest["images"]],
                          ["bootloader", "partition-table", "application"])
@@ -133,6 +133,10 @@ class PackagingTest(unittest.TestCase):
     def test_rejects_stale_application(self):
         (self.build / "pipkin.bin").write_bytes(application(revision="f" * 40))
         self.rejected("source revision")
+
+    def test_rejects_stale_compiled_board_identity(self):
+        (self.build / "pipkin.bin").write_bytes(application(board="esp32-2432s028r-provisional"))
+        self.rejected("compiled board profile")
 
     def test_rejects_moving_nvs_or_enabling_encryption(self):
         for data in [partition_table(nvs_offset=0xA000), partition_table(flags=1)]:
@@ -192,6 +196,60 @@ class PackagingTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be empty"):
             self.package()
         self.assertEqual(stale.read_bytes(), b"old")
+
+
+class BoardCatalogTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        (self.root / "boards").mkdir()
+        (self.root / "main").mkdir()
+        self.catalog = json.loads((SOURCE / "boards/profiles.json").read_text())
+        self.header = (SOURCE / "main/board.h").read_text()
+
+    def profile(self):
+        (self.root / "boards/profiles.json").write_text(json.dumps(self.catalog))
+        (self.root / "main/board.h").write_text(self.header)
+        return PACKAGER.board_profile(self.root)
+
+    def test_current_catalog_matches_compiled_profile(self):
+        profile = self.profile()
+        self.assertEqual(profile["id"], "esp32-2432s028r")
+        self.assertIn("esp32-2432s028r-provisional", profile["aliases"])
+        self.assertEqual(profile["hardware"], "confirmed")
+
+    def test_rejects_identity_or_qualification_drift(self):
+        profile = self.catalog["profiles"][0]
+        profile["id"] = "unrelated-board"
+        with self.assertRaisesRegex(ValueError, "not in the catalog"):
+            self.profile()
+        profile["id"] = "esp32-2432s028r"
+        profile["hardware"] = "unconfirmed"
+        with self.assertRaisesRegex(ValueError, "qualification differs"):
+            self.profile()
+
+    def test_rejects_duplicate_aliases_and_unrecorded_qualification(self):
+        profile = self.catalog["profiles"][0]
+        profile["aliases"] = [profile["id"]]
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            self.profile()
+        profile["aliases"] = []
+        profile["hardware"] = "confirmed"
+        profile["variants"] = []
+        with self.assertRaisesRegex(ValueError, "recorded hardware evidence"):
+            self.profile()
+
+    def test_confirmation_requires_both_display_and_touch_evidence(self):
+        for variant in self.catalog["profiles"][0]["variants"]:
+            variant["qualification"]["touch"] = None
+        with self.assertRaisesRegex(ValueError, "recorded hardware evidence"):
+            self.profile()
+
+    def test_catalog_cannot_authorize_different_display_hardware(self):
+        self.catalog["profiles"][0]["display"]["controller"] = "ST7789"
+        with self.assertRaisesRegex(ValueError, "unsupported display or touch"):
+            self.profile()
 
 
 if __name__ == "__main__":

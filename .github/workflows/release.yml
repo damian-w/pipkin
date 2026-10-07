@@ -56,15 +56,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cat > "$RUNNER_TEMP/firmware-release.md" <<'NOTES'
-          Prebuilt firmware for the provisional ESP32-2432S028R board profile
-          (ESP32, 4 MB flash, ILI9341 LCD and XPT2046 resistive touch).
+          Prebuilt firmware for the qualified ESP32-2432S028R board profile
+          (ESP32, 4 MB flash, ILI9341-compatible LCD and XPT2046-compatible
+          resistive touch). Tested physical variants are recorded in boards/profiles.json.
 
           Hardware qualification is still required before publishing this draft.
           Check first installation, update from the initial firmware, touch/display
           behaviour, saved page preference, USB reset and interrupted-flash recovery
           on the supported board.
 
-          Once published, Pipkin CLI 1.1.0 or later can install this release with
+          Once published, Pipkin CLI 1.4.0 or later can install this release with
           `pipkin flash`. Firmware can also be built and flashed with ESP-IDF as
           described in docs/development.md. The separate images preserve the
           initial partition layout; there is no automatic application rollback.

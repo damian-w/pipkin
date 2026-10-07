@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.2.0")
+set(PROJECT_VER "1.3.0")
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(pipkin)
@@ -13,5 +13,5 @@ if(NOT "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}" VERSION_
 endif()
 
 if(NOT IDF_TARGET STREQUAL "esp32")
-    message(FATAL_ERROR "The provisional board profile requires the esp32 target")
+    message(FATAL_ERROR "The selected board profile requires the esp32 target")
 endif()

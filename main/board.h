@@ -5,8 +5,9 @@
 
 namespace board {
 
-// Provisional ESP32-2432S028R profile; confirm the actual PCB before flashing.
-constexpr char kProfile[] = "esp32-2432s028r-provisional";
+// Qualified driver layout; physical variants and observations live in boards/profiles.json.
+constexpr char kProfile[] = "esp32-2432s028r";
+constexpr char kHardware[] = "confirmed";
 constexpr int kLcdClock = 14;
 constexpr int kLcdMosi = 13;
 constexpr int kLcdMiso = 12;

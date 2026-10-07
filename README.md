@@ -62,7 +62,7 @@ interface.
 To update the display later, run `pipkin flash`. It checks the attached board and
 current firmware, shows the latest published stable firmware version, and asks for
 yes/no confirmation before writing. `pipkin update` updates the CLI itself. Flashing
-requires CLI 1.1.0 or later; see the
+requires CLI 1.4.0 or later for the latest firmware; see the
 [firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md).
 
 ## Compatibility

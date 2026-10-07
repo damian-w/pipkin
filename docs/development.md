@@ -14,16 +14,17 @@ board with a USB data cable, then run:
 pipkin flash
 ```
 
-CLI **1.1.0 or later** downloads the latest published stable firmware and the pinned
+CLI **1.4.0 or later** downloads the latest published stable firmware and the pinned
 Espressif flashing tool, checks the connected board and current firmware, and shows
 the plan before asking for yes/no confirmation. Enter means no. You do not need
 Python or ESP-IDF for this route. The same command updates an existing Pipkin;
 `pipkin update` updates the CLI itself.
 
 The target is an **ESP32 CYD 2.8-inch touch board with 4 MB flash** matching the
-existing [board profile](#board-profile). Equivalent ESP32-S and WROOM boards use
-the same firmware; a printed model label does not need to match exactly. The profile
-is provisional and still needs qualification on physical boards. USB checks can
+existing [board profile](#board-profile). The tested physical variants are recorded
+in the [board catalog](../boards/profiles.json). Equivalent ESP32-S and WROOM-style
+boards use the same firmware when their wiring matches. Display and touch operation
+have been confirmed on the recorded variants. USB checks can
 identify the ESP chip and flash, but not the attached screen or touch hardware. A
 board with unknown or other firmware needs your confirmation that it is the intended
 CYD. Installing Pipkin replaces that firmware and its saved application settings.
@@ -32,7 +33,7 @@ the selected display page. A stored version is not proof that the firmware is ru
 use `pipkin flash --reinstall` to repair the same version when it does not respond.
 An incompatible existing Pipkin partition layout is rejected before writing.
 
-Firmware releases are created as drafts until hardware qualification is complete.
+Firmware releases are created as drafts for maintainer review and qualification.
 The CLI uses only published stable releases with compatible flash artifacts. See
 the [CLI firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md)
 for selecting a port or version, deliberate reinstalls and USB recovery. Firmware
@@ -89,17 +90,26 @@ CI runs these on every push, along with a firmware build.
 
 ## Board profile
 
-`main/board.h` holds a **provisional** ESP32-2432S028R ("Cheap Yellow Display")
-profile: ILI9341 LCD, XPT2046 resistive touch, 320 × 240 landscape, 4 MB flash. Pin
-assignments, touch calibration, display orientation, SPI speed and backlight
-polarity all live there. They have not yet been confirmed on production hardware,
-so check them against your board before flashing.
+`main/board.h` holds the qualified `esp32-2432s028r` ("Cheap Yellow Display")
+profile: ILI9341-compatible LCD, XPT2046-compatible resistive touch, 320 × 240
+landscape, 4 MB flash. Pin assignments, touch calibration, display orientation,
+SPI speed and backlight
+polarity all live there. The [board catalog](../boards/profiles.json) records the
+two tested dual-USB variants, their physical markings, electronic observations and
+completed checks. Controller compatibility is inferred from working display and
+touch drivers; controller silicon was not read back. Check an unfamiliar board's
+wiring and components before flashing.
 
 Equivalent 2.8-inch touch CYD boards with ESP32-S or WROOM modules use this same
 profile when their wiring and screen hardware match [main/board.h](../main/board.h).
 Module branding or a printed model label alone does not require a separate firmware
 profile. The current drivers and pin assignments remain the compatibility boundary;
 other screen hardware or ESP32-S3 boards need their own implementation and qualification.
+
+See [Board profiles and identification](board-profiles.md) for the contributor
+report workflow and adding another physical variant. Firmware 1.3.0 uses the
+canonical profile ID and requires CLI 1.4.0; the old provisional ID remains an
+alias for compatible updates.
 
 ## Display
 
@@ -158,5 +168,6 @@ needs qualification on production boards.
 ## Remaining hardware work
 
 - Application rollback: the flash layout has a single application slot.
-- Hardware qualification of touch accuracy, USB behaviour, first-time flashing,
-  firmware updates and host sleep signalling.
+- Additional qualification of touch accuracy, USB behavior across host platforms,
+  first-time flashing, firmware updates and host sleep signalling; the catalog
+  records which checks have been completed on each variant.

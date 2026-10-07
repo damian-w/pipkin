@@ -27,7 +27,10 @@ is provisional and still needs qualification on physical boards. USB checks can
 identify the ESP chip and flash, but not the attached screen or touch hardware. A
 board with unknown or other firmware needs your confirmation that it is the intended
 CYD. Installing Pipkin replaces that firmware and its saved application settings.
-Compatible Pipkin updates retain the selected display page.
+Compatible Pipkin updates and recovery of recognized stored Pipkin firmware retain
+the selected display page. A stored version is not proof that the firmware is running;
+use `pipkin flash --reinstall` to repair the same version when it does not respond.
+An incompatible existing Pipkin partition layout is rejected before writing.
 
 Firmware releases are created as drafts until hardware qualification is complete.
 The CLI uses only published stable releases with compatible flash artifacts. See

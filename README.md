@@ -35,10 +35,14 @@ something, the display says so rather than guessing.
 
 Swipe or tap to move between pages; Pipkin remembers your favourite. Hold anywhere on
 the screen for three seconds to open the About/status page. Lift your finger, then tap
-or swipe to return; it also closes after a minute untouched. When no new readings
-arrive for a while, as when your computer is off or asleep, the screen dims and then
-goes dark. It lights up again as soon as a new reading arrives, or for a minute at a
-touch. That first touch only wakes the screen.
+or swipe to return; it also closes after a minute untouched. Pipkin follows your
+computer's sleep and shutdown, and screen sleep on macOS and Windows. It wakes
+automatically on resume or when the helper starts at sign-in. Linux power events
+require systemd-logind. If a sleep/shutdown report is missed or the helper stops,
+the screen goes dark after 90 seconds without a helper heartbeat. Stale readings
+still dim and then go dark while the helper is connected. Touch wakes that dark
+screen for a minute; the first touch only wakes it. Explicit host sleep keeps the
+screen off until the host wakes.
 
 ## Getting started
 

@@ -118,11 +118,22 @@ the first reading, adds setup guidance after eight seconds, and shows a QR code
 for `https://pipkin.io/start` after eighteen seconds without the helper. On the
 first reading, a four-second finish animation leads into Overview.
 
-The PWM backlight stays bright while readings are fresh. It dims to 20% after
-five stale minutes (ten minutes without a fresh observation), then turns off after
-fifteen stale minutes. A fresh reading restores brightness; touch wakes it for a
-minute without activating a page control. Explicit `kind=host state=asleep`
-also turns it off; the CLI currently sends awake heartbeats only. Tune
+The PWM backlight follows explicit `kind=host state=asleep` and `awake` reports.
+The CLI observes system sleep/resume and shutdown on macOS, Windows and Linux
+(systemd-logind), plus display sleep/wake on macOS and Windows. It preserves display
+sleep during a background system wake. Startup runs at sign-in; pre-login boot
+waking is not provided by the current user services.
+
+If host heartbeats stop, the screen turns off after 90 seconds, even before any
+usage has arrived. This does not change the host's diagnostic power state. Explicit
+disconnect also turns it off. An explicit wake or heartbeat recovery lights the
+screen for a minute while fresh usage loads; regular heartbeats do not extend this
+grace. While connected, stale readings dim to 20% after five stale minutes (ten
+minutes without a fresh observation), then turn off after fifteen stale minutes.
+Touch wakes a screen darkened by stale readings or missing helper traffic for a
+minute without activating a page control; explicit host sleep ignores touch.
+Serial reception remains active while dark, so a host report can wake the display
+without resetting the ESP32. Tune `kHostPresenceMs`, `kHostWakeMs`,
 `kDimAfterStaleMs`, `kOffAfterStaleMs` and `kTouchWakeMs` in `include/pipkin/model.h`.
 
 Hold anywhere on the screen for three seconds to open the About/status screen,

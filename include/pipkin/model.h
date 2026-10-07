@@ -11,6 +11,9 @@ namespace pipkin {
 constexpr std::size_t kMaxPacketBytes = 768;
 constexpr uint64_t kStaleAfterMs = 5 * 60 * 1000;
 constexpr uint64_t kHostLivenessMs = 60 * 1000;
+// Allow three missed 30-second heartbeats before blanking a powered USB display.
+constexpr uint64_t kHostPresenceMs = 90 * 1000;
+constexpr uint64_t kHostWakeMs = 60 * 1000;
 constexpr uint64_t kTransitionMs = 650;
 constexpr uint64_t kStatusIdleMs = 60 * 1000;
 constexpr uint64_t kAboutHoldMs = 3000;
@@ -104,6 +107,7 @@ struct State {
     Clock clock;
     HostState host = HostState::Unknown;
     std::optional<uint64_t> host_received_ms;
+    std::optional<uint64_t> host_woke_ms;
     bool transport_connected = false;
     Overlay overlay = Overlay::None;
     Page page = Page::Overview;

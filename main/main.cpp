@@ -153,7 +153,8 @@ extern "C" void app_main() {
             saved_page = page;
         }
 
-        const bool awake = state.overlay != pipkin::Overlay::Sleep;
+        const int target = pipkin::backlight_level(state, now) * 10;
+        const bool awake = target > 0;
         const bool frame_due =
             pipkin::animation_active(state, now)
                 ? now - rendered_ms >= 33
@@ -164,7 +165,6 @@ extern "C" void app_main() {
             dirty = false;
         }
         // Fades toward the model's level at a full-range sweep per 400 ms.
-        const int target = pipkin::backlight_level(state, now) * 10;
         if (backlight != target) {
             const int step = std::max(1, static_cast<int>((now - faded_ms) * 1000 / 400));
             backlight = target > backlight ? std::min(target, backlight + step)

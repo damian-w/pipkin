@@ -667,7 +667,8 @@ void reading_changes() {
 void backlight() {
     Feed feed;
     feed.clock();
-    assert(backlight_level(feed.state, 3600000) == 100 && !newest_reading_age_ms(feed.state, 0));
+    assert(backlight_level(feed.state, kHostPresenceMs - 1) == 100);
+    assert(backlight_level(feed.state, 3600000) == 0 && !newest_reading_age_ms(feed.state, 0));
     assert(feed.send(snapshot, 0));
     assert(backlight_level(feed.state, 0) == 100);
     assert(feed.send("kind=host state=asleep", 1000));
@@ -677,14 +678,20 @@ void backlight() {
 
     constexpr uint64_t dim = kStaleAfterMs + kDimAfterStaleMs;
     constexpr uint64_t off = kStaleAfterMs + kOffAfterStaleMs;
-    assert(backlight_level(feed.state, dim - 1) == 100);
-    assert(backlight_level(feed.state, dim) == kDimLevel);
-    assert(backlight_level(feed.state, off - 1) == kDimLevel);
-    assert(backlight_level(feed.state, off) == 0);
+    // Isolate quota freshness from the independent helper-presence timeout.
+    const auto with_heartbeat = [&](uint64_t now) {
+        State state = feed.state;
+        state.host_received_ms = now;
+        return backlight_level(state, now);
+    };
+    assert(with_heartbeat(dim - 1) == 100);
+    assert(with_heartbeat(dim) == kDimLevel);
+    assert(with_heartbeat(off - 1) == kDimLevel);
+    assert(with_heartbeat(off) == 0);
     assert(feed.send("kind=usage provider=claude mode=full account=sample-c observed=1800000900 "
                      "weekly=metered weekly_id=week-c weekly_used=100",
                      900000));
-    assert(backlight_level(feed.state, off) == 100);
+    assert(with_heartbeat(off) == 100);
     const auto page = effective_page(feed.state);
     constexpr uint64_t dark = 900000 + off;
     assert(backlight_level(feed.state, dark) == 0);
@@ -696,10 +703,48 @@ void backlight() {
     assert(backlight_level(feed.state, dark + kAboutHoldMs + 50) == 100);
     assert(backlight_level(feed.state, dark + kAboutHoldMs + 50 + kTouchWakeMs) == 0);
     constexpr uint64_t fresh = dark + kAboutHoldMs + kTouchWakeMs + 1000;
+    assert(feed.send("kind=host state=awake", fresh));
     assert(feed.send(patch + std::to_string(epoch + dark / 1000) +
                          " session=metered session_id=period-a session_used=500",
                      fresh));
     assert(backlight_level(feed.state, fresh) == 100);
+}
+
+void host_power_backlight() {
+    Feed feed;
+    feed.clock();
+    assert(feed.send(snapshot, 0));
+    assert(feed.send("kind=host state=awake", 0));
+    assert(backlight_level(feed.state, kHostPresenceMs - 1) == 100);
+    assert(backlight_level(feed.state, kHostPresenceMs) == 0);
+    assert(feed.state.host == HostState::Awake && feed.state.overlay == Overlay::None);
+    assert(!host_alive(feed.state, kHostPresenceMs));
+
+    // Recovering host presence lights the screen without waiting for an API read.
+    constexpr uint64_t stale = kStaleAfterMs + kOffAfterStaleMs + 1000;
+    assert(feed.send("kind=host state=awake", stale));
+    assert(backlight_level(feed.state, stale) == 100);
+    assert(feed.send("kind=host state=awake", stale + 30000));
+    assert(feed.send("kind=host state=awake", stale + kHostWakeMs));
+    assert(backlight_level(feed.state, stale + kHostWakeMs) == 0);
+
+    assert(feed.send("kind=host state=asleep", stale + 61000));
+    touch(feed.state, true, 100, 100, stale + 61001);
+    assert(backlight_level(feed.state, stale + 61001) == 0);
+    assert(feed.send("kind=host state=awake", stale + 62000));
+    assert(backlight_level(feed.state, stale + 62000) == 100);
+    touch(feed.state, true, 100, 100, stale + 62001);
+    assert(feed.send("kind=host state=disconnected", stale + 63000));
+    assert(backlight_level(feed.state, stale + 63000) == 0);
+    assert(feed.state.host == HostState::Disconnected && feed.state.overlay == Overlay::None);
+
+    // Generic traffic cannot keep a host's expired heartbeat alive.
+    Feed noisy;
+    noisy.clock();
+    assert(noisy.send("kind=host state=awake", 0));
+    assert(noisy.send(snapshot, kHostPresenceMs));
+    assert(backlight_level(noisy.state, kHostPresenceMs) == 0);
+    assert(noisy.state.host == HostState::Awake);
 }
 
 void unsequenced_senders() {
@@ -730,6 +775,10 @@ void helper_fixture() {
     bool saw_not_started = false;
     while (std::getline(fixture, line)) {
         assert(ingest(state, line, now += 100));
+        if (line.find("kind=host state=asleep") != std::string::npos)
+            assert(state.overlay == Overlay::Sleep && backlight_level(state, now) == 0);
+        if (line.find("kind=host state=awake") != std::string::npos)
+            assert(state.overlay == Overlay::None && backlight_level(state, now) == 100);
         if (line.find("session=not_started") != std::string::npos) {
             const auto& claude = state.providers[1];
             assert(claude.session.state == AllowanceState::NotStarted);
@@ -740,7 +789,7 @@ void helper_fixture() {
         }
         ++count;
     }
-    assert(count == 14 && saw_not_started);
+    assert(count == 19 && saw_not_started);
     assert(state.providers[0].weekly.used_tenths == 1000 && state.providers[0].banked_resets == 0);
     assert(state.providers[1].session.state == AllowanceState::Metered);
     assert(state.providers[1].session.used_tenths == 10 && state.clock.observation_epoch == 7);
@@ -768,6 +817,7 @@ int main() {
     status_closes_when_idle();
     boot_sequence();
     backlight();
+    host_power_backlight();
     unsequenced_senders();
     helper_fixture();
     std::cout << "Core protocol, state, clock and navigation checks passed.\n";

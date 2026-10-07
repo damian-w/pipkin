@@ -264,7 +264,18 @@ std::optional<uint64_t> newest_reading_age_ms(const State& state, uint64_t now_m
 uint8_t backlight_level(const State& state, uint64_t now_ms) {
     if (state.overlay == Overlay::Sleep)
         return 0;
-    if (state.touched_ms && now_ms >= state.touched_ms && now_ms - state.touched_ms < kTouchWakeMs)
+    if (state.touched_ms && now_ms >= state.touched_ms && now_ms - state.touched_ms < kTouchWakeMs &&
+        (state.host != HostState::Disconnected ||
+         state.touched_ms > state.host_received_ms.value_or(0)))
+        return 100;
+    // Silence means host presence is unknown, not proof that the host slept.
+    // Blanking is independent from the power-state diagnostic and usage freshness.
+    const uint64_t presence_ms = state.host_received_ms.value_or(state.last_received_ms);
+    if (state.host == HostState::Disconnected ||
+        (now_ms >= presence_ms && now_ms - presence_ms >= kHostPresenceMs))
+        return 0;
+    if (state.host_woke_ms && now_ms >= *state.host_woke_ms &&
+        now_ms - *state.host_woke_ms < kHostWakeMs)
         return 100;
     const auto age = newest_reading_age_ms(state, now_ms);
     if (!age || *age < kStaleAfterMs + kDimAfterStaleMs)

@@ -295,9 +295,15 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
         if (!packet.only({"v", "kind", "seq", "state"}))
             return false;
         const auto status = packet.get("state");
-        if (status == "awake")
+        if (status == "awake") {
+            // Ordinary heartbeats must not continually restart the wake grace.
+            // A real wake or recovery from missing heartbeats lights stale readings
+            // while the helper fetches fresh observations.
+            if (state.host != HostState::Awake || !state.host_received_ms ||
+                now_ms - *state.host_received_ms >= kHostPresenceMs)
+                state.host_woke_ms = now_ms;
             state.host = HostState::Awake;
-        else if (status == "asleep")
+        } else if (status == "asleep")
             state.host = HostState::Asleep;
         else if (status == "disconnected")
             state.host = HostState::Disconnected;

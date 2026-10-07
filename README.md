@@ -53,6 +53,12 @@ The CLI lives in its own repository, which covers installation, everyday command
 privacy and exactly what it reads. This repository holds the display's firmware and
 interface.
 
+To update the display later, run `pipkin flash`. It checks the attached board and
+current firmware, shows the latest published stable firmware version, and asks for
+yes/no confirmation before writing. `pipkin update` updates the CLI itself. Flashing
+requires CLI 1.1.0 or later; see the
+[firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md).
+
 ## Compatibility
 
 The CLI supports macOS, Linux and Windows on ARM64 and Intel/AMD 64-bit.
@@ -61,9 +67,25 @@ for supported sign-ins and credential stores.
 
 ## Build your own
 
-Pipkin runs on an ESP32 "Cheap Yellow Display" board, and its firmware is published
-here. See [building and developing Pipkin](docs/development.md) and the
-[protocol reference](docs/protocol.md).
+Pipkin runs on **ESP32 CYD 2.8-inch touch boards with 4 MB flash** that match its
+current firmware profile. Equivalent ESP32-S and WROOM boards use the same profile;
+the printed product label does not need to match exactly. The profile is provisional
+and still needs physical hardware qualification. Check the
+[board guide](docs/development.md#board-profile) for its wiring and driver requirements.
+
+You can install a published firmware release with the CLI, without setting up
+ESP-IDF or Python:
+
+```sh
+pipkin flash
+```
+
+Install the CLI, connect your board with a USB data cable, then check the board and
+flash plan before confirming. A board without Pipkin firmware needs your confirmation
+that it is the intended ESP32 CYD 2.8-inch touch board. See
+[building and developing Pipkin](docs/development.md) for the board notes
+and the full source-build route, and the [protocol reference](docs/protocol.md) for
+USB integrations.
 
 <p>
   <img src="docs/images/badge-licence.svg" alt="Licence: noncommercial" height="28">

@@ -125,10 +125,12 @@ minute without activating a page control. Explicit `kind=host state=asleep`
 also turns it off; the CLI currently sends awake heartbeats only. Tune
 `kDimAfterStaleMs`, `kOffAfterStaleMs` and `kTouchWakeMs` in `include/pipkin/model.h`.
 
-Hold the clock for 1.2 seconds to open the status screen, which shows the firmware
-version, source revision, the connection to your computer and how recent each
-reading is. For more detail, run `pipkin status` on the computer. Tap or swipe to
-close it; it also closes itself after a minute untouched.
+Hold anywhere on the screen for three seconds to open the About/status screen,
+which shows the firmware version, source revision, the connection to your computer
+and how recent each reading is. The hold allows small finger movements and brief
+touch dropouts. It opens while your finger is down and stays open when you release.
+A later tap or swipe closes it; it also closes itself after a minute untouched.
+For more detail, run `pipkin status` on the computer.
 
 ## Serial connection
 

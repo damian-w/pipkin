@@ -106,6 +106,9 @@ Page selected_page(const State& state) {
 
 namespace {
 
+constexpr int kTapMovementPx = 12;
+constexpr int kHoldMovementPx = 25;
+
 void show_about(State& state, bool open, uint64_t now_ms) {
     if (state.about_open != open) {
         state.about_open = open;
@@ -114,8 +117,18 @@ void show_about(State& state, bool open, uint64_t now_ms) {
     }
 }
 
-// The whole header is a hold target for the clock in either alignment.
-bool clock_target(int x, int y) { return x >= 0 && x < 320 && y >= 0 && y < 32; }
+void finish_touch(State& state, uint64_t now_ms) {
+    const auto& gesture = state.gesture;
+    if (!gesture.consumed) {
+        const int dx = gesture.last_x - gesture.start_x;
+        const int dy = gesture.last_y - gesture.start_y;
+        if (std::abs(dx) >= 60 && std::abs(dx) >= 2 * std::abs(dy))
+            swipe(state, dx < 0 ? 1 : -1, now_ms);
+        else if (!gesture.moved)
+            tap(state, gesture.last_x, gesture.last_y, now_ms);
+    }
+    state.gesture = TouchGesture{};
+}
 
 } // namespace
 
@@ -161,49 +174,52 @@ void swipe(State& state, int direction, uint64_t now_ms) {
 void touch(State& state, bool pressed, int x, int y, uint64_t now_ms) {
     auto& gesture = state.gesture;
     if (state.overlay != Overlay::None || (pressed && (x < 0 || x >= 320 || y < 0 || y >= 240)) ||
-        (gesture.active && now_ms < gesture.started_ms)) {
+        (gesture.active && now_ms < gesture.started_ms) ||
+        (gesture.release_started_ms && now_ms < *gesture.release_started_ms)) {
         gesture = TouchGesture{};
         return;
     }
+    // Confirm release before handling a new press, so a longer gap starts a fresh hold.
+    if (gesture.release_started_ms &&
+        now_ms - *gesture.release_started_ms >= kTouchReleaseGraceMs)
+        finish_touch(state, now_ms);
     if (pressed && !gesture.active) {
         // Consume the first touch when waking a dark screen.
         const bool dark = backlight_level(state, now_ms) == 0;
-        gesture = {true,
-                   false,
-                   dark,
-                   static_cast<int16_t>(x),
-                   static_cast<int16_t>(y),
-                   static_cast<int16_t>(x),
-                   static_cast<int16_t>(y),
-                   now_ms};
+        gesture = TouchGesture{};
+        gesture.active = true;
+        gesture.consumed = dark;
+        gesture.start_x = gesture.last_x = static_cast<int16_t>(x);
+        gesture.start_y = gesture.last_y = static_cast<int16_t>(y);
+        gesture.started_ms = now_ms;
         state.touched_ms = now_ms;
         return;
     }
     if (!gesture.active)
         return;
-    state.touched_ms = now_ms;
-    if (pressed) {
-        gesture.last_x = static_cast<int16_t>(x);
-        gesture.last_y = static_cast<int16_t>(y);
-        gesture.moved = gesture.moved || std::abs(x - gesture.start_x) > 12 ||
-                        std::abs(y - gesture.start_y) > 12;
+    if (!pressed) {
+        // A brief contact dropout keeps the gesture; idle time starts at the first release.
+        if (!gesture.release_started_ms) {
+            gesture.release_started_ms = now_ms;
+            state.touched_ms = now_ms;
+        }
+        return;
     }
-    if (!gesture.consumed && !gesture.moved && !state.about_open &&
-        clock_target(gesture.start_x, gesture.start_y) && now_ms - gesture.started_ms >= 1200) {
+
+    gesture.release_started_ms.reset();
+    state.touched_ms = now_ms;
+    gesture.last_x = static_cast<int16_t>(x);
+    gesture.last_y = static_cast<int16_t>(y);
+    const int dx = std::abs(x - gesture.start_x);
+    const int dy = std::abs(y - gesture.start_y);
+    gesture.moved = gesture.moved || dx > kTapMovementPx || dy > kTapMovementPx;
+    gesture.hold_moved = gesture.hold_moved || dx > kHoldMovementPx || dy > kHoldMovementPx;
+    // Only open on confirmed contact, never while waiting for release confirmation.
+    if (!gesture.consumed && !gesture.hold_moved && !state.about_open &&
+        now_ms - gesture.started_ms >= kAboutHoldMs) {
         show_about(state, true, now_ms);
         gesture.consumed = true;
     }
-    if (pressed)
-        return;
-    if (!gesture.consumed) {
-        const int dx = gesture.last_x - gesture.start_x;
-        const int dy = gesture.last_y - gesture.start_y;
-        if (std::abs(dx) >= 60 && std::abs(dx) >= 2 * std::abs(dy))
-            swipe(state, dx < 0 ? 1 : -1, now_ms);
-        else if (!gesture.moved)
-            tap(state, gesture.last_x, gesture.last_y, now_ms);
-    }
-    gesture = TouchGesture{};
 }
 
 void start_boot(State& state, uint64_t now_ms) { state.boot = {true, now_ms, std::nullopt}; }

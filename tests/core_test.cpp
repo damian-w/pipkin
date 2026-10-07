@@ -29,6 +29,11 @@ const std::string snapshot =
 
 const std::string patch = "kind=usage provider=codex mode=patch account=sample-a observed=";
 
+void release_touch(State& state, uint64_t now_ms) {
+    touch(state, false, 0, 0, now_ms);
+    touch(state, false, 0, 0, now_ms + kTouchReleaseGraceMs);
+}
+
 void state_and_merge() {
     Feed feed;
     assert(feed.state.page == Page::Overview);
@@ -379,66 +384,214 @@ void gestures_and_about() {
     assert(effective_page(feed.state) == Page::Overview);
     touch(feed.state, true, 270, 100, 500);
     touch(feed.state, true, 80, 110, 600);
-    touch(feed.state, false, 0, 0, 650);
+    release_touch(feed.state, 650);
     assert(effective_page(feed.state) == Page::Codex);
-    touch(feed.state, true, 80, 100, 700);
-    touch(feed.state, true, 270, 100, 800);
-    touch(feed.state, false, 0, 0, 850);
+    touch(feed.state, true, 80, 100, 800);
+    touch(feed.state, true, 270, 100, 900);
+    release_touch(feed.state, 950);
     assert(effective_page(feed.state) == Page::Overview);
     const auto revision = feed.state.view_revision;
-    touch(feed.state, true, 160, 50, 900);
-    touch(feed.state, true, 170, 180, 1000);
-    touch(feed.state, false, 0, 0, 1050);
+    touch(feed.state, true, 160, 50, 1100);
+    touch(feed.state, true, 170, 180, 1200);
+    release_touch(feed.state, 1250);
     assert(effective_page(feed.state) == Page::Overview && feed.state.view_revision == revision);
 
-    restore_page(feed.state, Page::Codex, 1100);
-    touch(feed.state, true, 160, 15, 1200);
-    touch(feed.state, true, 164, 17, 2399);
+    restore_page(feed.state, Page::Codex, 1400);
+    touch(feed.state, true, 160, 15, 1500);
+    touch(feed.state, true, 164, 17, 4499);
     assert(!feed.state.about_open);
-    touch(feed.state, true, 164, 17, 2400);
+    touch(feed.state, true, 164, 17, 4500);
     assert(effective_page(feed.state) == Page::About && feed.state.about_open);
     assert(feed.state.page == Page::Codex && selected_page(feed.state) == Page::Codex);
     assert(!page_visible(feed.state, Page::About) && visible_pages(feed.state).count == 3);
     const auto about_revision = feed.state.view_revision;
-    touch(feed.state, false, 0, 0, 2450);
+    release_touch(feed.state, 4550);
     assert(feed.state.about_open && feed.state.view_revision == about_revision);
     assert(feed.state.device_info.firmware_version == "Unknown");
     assert(feed.state.device_info.git_revision == "Unknown");
-    restore_page(feed.state, Page::About, 2500);
+    restore_page(feed.state, Page::About, 4700);
     assert(feed.state.page == Page::Codex);
-    tap(feed.state, 300, 180, 2600);
+    tap(feed.state, 300, 180, 4800);
     assert(effective_page(feed.state) == Page::Codex && !feed.state.about_open);
 
-    touch(feed.state, true, 160, 15, 3000);
-    touch(feed.state, false, 0, 0, 4200);
-    assert(feed.state.about_open);
-    touch(feed.state, true, 270, 90, 4300);
-    touch(feed.state, true, 70, 90, 4400);
-    touch(feed.state, false, 0, 0, 4500);
-    assert(effective_page(feed.state) == Page::Codex && !feed.state.about_open);
     touch(feed.state, true, 160, 15, 5000);
-    touch(feed.state, true, 180, 15, 6200);
-    touch(feed.state, false, 0, 0, 6300);
+    touch(feed.state, true, 160, 15, 8000);
+    release_touch(feed.state, 8050);
+    assert(feed.state.about_open);
+    touch(feed.state, true, 270, 90, 8200);
+    touch(feed.state, true, 70, 90, 8300);
+    release_touch(feed.state, 8400);
+    assert(effective_page(feed.state) == Page::Codex && !feed.state.about_open);
+    touch(feed.state, true, 160, 15, 8600);
+    touch(feed.state, true, 186, 15, 11600);
+    release_touch(feed.state, 11700);
     assert(!feed.state.about_open);
-    touch(feed.state, true, 160, 15, 7000);
-    assert(feed.send("kind=host state=asleep", 7100));
-    touch(feed.state, true, 160, 15, 8200);
-    assert(feed.send("kind=host state=awake", 8250));
-    touch(feed.state, false, 0, 0, 8300);
+    touch(feed.state, true, 160, 15, 12000);
+    assert(feed.send("kind=host state=asleep", 12100));
+    touch(feed.state, true, 160, 15, 15000);
+    assert(feed.send("kind=host state=awake", 15050));
+    release_touch(feed.state, 15100);
     assert(!feed.state.about_open);
 
-    touch(feed.state, true, 290, 15, 9000);
-    touch(feed.state, false, 0, 0, 10200);
+    touch(feed.state, true, 290, 15, 16000);
+    touch(feed.state, true, 290, 15, 19000);
+    release_touch(feed.state, 19050);
     assert(feed.state.about_open);
-    assert(feed.send("kind=app provider=codex state=signed_out", 10300));
+    assert(feed.send("kind=app provider=codex state=signed_out", 19200));
     assert(feed.state.about_open && feed.state.page == Page::Overview);
     assert(visible_pages(feed.state).count == 2);
-    swipe(feed.state, -1, 10400);
+    swipe(feed.state, -1, 19300);
     assert(effective_page(feed.state) == Page::Overview);
-    swipe(feed.state, 1, 10500);
+    swipe(feed.state, 1, 19400);
     assert(effective_page(feed.state) == Page::Claude);
-    swipe(feed.state, 1, 10600);
+    swipe(feed.state, 1, 19500);
     assert(effective_page(feed.state) == Page::Overview);
+}
+
+void about_hold_anywhere() {
+    assert(kAboutHoldMs == 3000 && kTouchReleaseGraceMs == 100);
+    // Header, both cards, footer, and the display's extreme corners are all targets.
+    constexpr int positions[][2] = {{160, 15}, {160, 70}, {160, 170},
+                                  {300, 225}, {0, 0}, {319, 239}};
+    for (Page page : {Page::Overview, Page::Codex, Page::Claude}) {
+        for (const auto& position : positions) {
+            Feed feed;
+            feed.clock();
+            assert(feed.send(snapshot));
+            assert(feed.send("kind=usage provider=claude mode=full account=sample-c observed=null "
+                             "session=no_cap"));
+            restore_page(feed.state, page, 50);
+            touch(feed.state, true, position[0], position[1], 100);
+            touch(feed.state, true, position[0], position[1], 3099);
+            assert(!feed.state.about_open && effective_page(feed.state) == page);
+            touch(feed.state, true, position[0], position[1], 3100);
+            assert(feed.state.about_open && effective_page(feed.state) == Page::About);
+            assert(selected_page(feed.state) == page && visible_pages(feed.state).count == 3);
+            release_touch(feed.state, 3150);
+            assert(feed.state.about_open && selected_page(feed.state) == page);
+        }
+    }
+    // About is also available before either provider has a usable reading.
+    State empty;
+    touch(empty, true, 160, 170, 100);
+    touch(empty, true, 160, 170, 3100);
+    assert(empty.about_open && visible_pages(empty).count == 1);
+}
+
+void about_hold_movement() {
+    for (int drift : {13, 25}) {
+        State state;
+        touch(state, true, 160, 100, 1000);
+        touch(state, true, 160 + drift, 100 - drift, 2000);
+        touch(state, true, 160 - drift, 100 + drift, 3999);
+        assert(!state.about_open);
+        touch(state, true, 160, 100, 4000);
+        assert(state.about_open);
+    }
+    for (bool vertical : {false, true}) {
+        State state;
+        touch(state, true, 160, 100, 1000);
+        touch(state, true, vertical ? 160 : 186, vertical ? 126 : 100, 2000);
+        touch(state, true, 160, 100, 4000);
+        assert(!state.about_open); // Returning to the origin cannot rescue excessive drift.
+        release_touch(state, 4100);
+        assert(!state.about_open);
+    }
+    // Wider hold tolerance must not make card taps more permissive.
+    for (int drift : {12, 13, 25}) {
+        Feed feed;
+        assert(feed.send(snapshot));
+        touch(feed.state, true, 160, 100, 1000);
+        touch(feed.state, true, 160 + drift, 100, 1050);
+        release_touch(feed.state, 1100);
+        assert(!feed.state.about_open);
+        assert(selected_page(feed.state) == (drift == 12 ? Page::Codex : Page::Overview));
+    }
+}
+
+void about_hold_contact_dropouts() {
+    State repeated;
+    touch(repeated, true, 160, 170, 1000);
+    touch(repeated, false, 0, 0, 1500);
+    touch(repeated, false, 0, 0, 1550);
+    touch(repeated, true, 175, 170, 1599);
+    touch(repeated, false, 0, 0, 2400);
+    touch(repeated, true, 160, 170, 2499);
+    touch(repeated, true, 160, 170, 3999);
+    assert(!repeated.about_open);
+    touch(repeated, true, 160, 170, 4000);
+    assert(repeated.about_open); // Each brief dropout preserves the original hold timer.
+
+    State threshold;
+    touch(threshold, true, 160, 15, 1000);
+    touch(threshold, false, 0, 0, 3999);
+    touch(threshold, false, 0, 0, 4000);
+    assert(!threshold.about_open); // Missing contact never opens About at the deadline.
+    touch(threshold, true, 160, 15, 4098);
+    assert(threshold.about_open); // A valid sample after a 99 ms gap can still open it.
+
+    State released;
+    touch(released, true, 160, 15, 1000);
+    touch(released, false, 0, 0, 3999);
+    touch(released, false, 0, 0, 4098);
+    assert(!released.about_open);
+    touch(released, false, 0, 0, 4099);
+    assert(!released.about_open);
+    touch(released, true, 160, 15, 4100);
+    touch(released, true, 160, 15, 7099);
+    assert(!released.about_open);
+    touch(released, true, 160, 15, 7100);
+    assert(released.about_open); // A confirmed release requires a fresh three-second hold.
+
+    for (uint64_t gap : {uint64_t{100}, uint64_t{500}}) {
+        State restarted;
+        touch(restarted, true, 160, 15, 1000);
+        touch(restarted, false, 0, 0, 3950);
+        const auto restart = 3950 + gap;
+        // The next sample can be pressed: no intermediate false poll is required.
+        touch(restarted, true, 160, 15, restart);
+        assert(!restarted.about_open);
+        touch(restarted, true, 160, 15, restart + 2999);
+        assert(!restarted.about_open);
+        touch(restarted, true, 160, 15, restart + 3000);
+        assert(restarted.about_open);
+    }
+}
+
+void about_requires_separate_exit_gesture() {
+    Feed feed;
+    assert(feed.send(snapshot));
+    restore_page(feed.state, Page::Codex, 100);
+    touch(feed.state, true, 160, 170, 1000);
+    touch(feed.state, true, 160, 170, 4000);
+    assert(feed.state.about_open);
+    const auto revision = feed.state.view_revision;
+    touch(feed.state, false, 0, 0, 4050);
+    touch(feed.state, true, 160, 170, 4149);
+    touch(feed.state, true, 300, 170, 4200);
+    touch(feed.state, false, 0, 0, 4250);
+    touch(feed.state, false, 0, 0, 4349);
+    assert(feed.state.about_open);
+    touch(feed.state, false, 0, 0, 4350);
+    assert(feed.state.about_open && feed.state.view_revision == revision);
+    // Continued holding, brief recovery, movement, and the opener's release are consumed.
+    touch(feed.state, true, 160, 100, 4400);
+    touch(feed.state, false, 0, 0, 4450);
+    touch(feed.state, false, 0, 0, 4549);
+    assert(feed.state.about_open);
+    touch(feed.state, false, 0, 0, 4550);
+    assert(!feed.state.about_open && effective_page(feed.state) == Page::Codex);
+    assert(feed.state.view_revision == revision + 1);
+
+    touch(feed.state, true, 160, 170, 5000);
+    touch(feed.state, true, 160, 170, 8000);
+    touch(feed.state, false, 0, 0, 8050);
+    // A pressed sample after the grace period both confirms release and starts a new swipe.
+    touch(feed.state, true, 270, 90, 8150);
+    assert(feed.state.about_open);
+    touch(feed.state, true, 70, 90, 8200);
+    release_touch(feed.state, 8250);
+    assert(!feed.state.about_open && effective_page(feed.state) == Page::Codex);
 }
 
 void status_closes_when_idle() {
@@ -446,13 +599,15 @@ void status_closes_when_idle() {
     feed.clock();
     assert(feed.send(snapshot));
     touch(feed.state, true, 290, 15, 1000);
-    touch(feed.state, true, 290, 15, 2300);
-    idle(feed.state, 2300 + kStatusIdleMs);
+    touch(feed.state, true, 290, 15, 4000);
+    idle(feed.state, 4000 + kStatusIdleMs);
     assert(feed.state.about_open); // Still held: the finger counts as activity.
-    touch(feed.state, false, 0, 0, 2400);
-    idle(feed.state, 2400 + kStatusIdleMs - 1);
+    touch(feed.state, true, 290, 15, 64000);
+    release_touch(feed.state, 64050);
+    touch(feed.state, false, 0, 0, 65000);
+    idle(feed.state, 64050 + kStatusIdleMs - 1);
     assert(feed.state.about_open);
-    idle(feed.state, 2400 + kStatusIdleMs);
+    idle(feed.state, 64050 + kStatusIdleMs);
     assert(!feed.state.about_open && effective_page(feed.state) == Page::Overview);
 }
 
@@ -534,14 +689,17 @@ void backlight() {
     constexpr uint64_t dark = 900000 + off;
     assert(backlight_level(feed.state, dark) == 0);
     touch(feed.state, true, 300, 225, dark);
-    touch(feed.state, false, 300, 225, dark + 50);
+    touch(feed.state, true, 300, 225, dark + kAboutHoldMs);
+    assert(!feed.state.about_open); // The waking gesture cannot also open About.
+    release_touch(feed.state, dark + kAboutHoldMs + 50);
     assert(effective_page(feed.state) == page);
-    assert(backlight_level(feed.state, dark + 50) == 100);
-    assert(backlight_level(feed.state, dark + 50 + kTouchWakeMs) == 0);
+    assert(backlight_level(feed.state, dark + kAboutHoldMs + 50) == 100);
+    assert(backlight_level(feed.state, dark + kAboutHoldMs + 50 + kTouchWakeMs) == 0);
+    constexpr uint64_t fresh = dark + kAboutHoldMs + kTouchWakeMs + 1000;
     assert(feed.send(patch + std::to_string(epoch + dark / 1000) +
                          " session=metered session_id=period-a session_used=500",
-                     dark + kTouchWakeMs + 1000));
-    assert(backlight_level(feed.state, dark + kTouchWakeMs + 1000) == 100);
+                     fresh));
+    assert(backlight_level(feed.state, fresh) == 100);
 }
 
 void unsequenced_senders() {
@@ -602,6 +760,10 @@ int main() {
     conditional_provider_visibility();
     session_not_started();
     gestures_and_about();
+    about_hold_anywhere();
+    about_hold_movement();
+    about_hold_contact_dropouts();
+    about_requires_separate_exit_gesture();
     reading_changes();
     status_closes_when_idle();
     boot_sequence();

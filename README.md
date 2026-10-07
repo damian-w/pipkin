@@ -33,10 +33,12 @@ something, the display says so rather than guessing.
   <img src="docs/images/status.png" alt="The status page" width="400">
 </p>
 
-Swipe or tap to move between pages; Pipkin remembers your favourite. Hold the clock for
-a status page. When no new readings arrive for a while, as when your computer is off or
-asleep, the screen dims and then goes dark. It lights up again as soon as a new reading
-arrives, or for a minute at a touch.
+Swipe or tap to move between pages; Pipkin remembers your favourite. Hold anywhere on
+the screen for three seconds to open the About/status page. Lift your finger, then tap
+or swipe to return; it also closes after a minute untouched. When no new readings
+arrive for a while, as when your computer is off or asleep, the screen dims and then
+goes dark. It lights up again as soon as a new reading arrives, or for a minute at a
+touch. That first touch only wakes the screen.
 
 ## Getting started
 

@@ -13,6 +13,8 @@ constexpr uint64_t kStaleAfterMs = 5 * 60 * 1000;
 constexpr uint64_t kHostLivenessMs = 60 * 1000;
 constexpr uint64_t kTransitionMs = 650;
 constexpr uint64_t kStatusIdleMs = 60 * 1000;
+constexpr uint64_t kAboutHoldMs = 3000;
+constexpr uint64_t kTouchReleaseGraceMs = 100;
 constexpr uint64_t kBootIntroMs = 1440;
 constexpr uint64_t kBootFinishMs = 4000;
 // Dim/off delays start when the latest reading becomes stale.
@@ -78,13 +80,16 @@ struct DeviceInfo {
 
 struct TouchGesture {
     bool active = false;
+    // Taps stay precise while holds allow more finger drift.
     bool moved = false;
+    bool hold_moved = false;
     bool consumed = false;
     int16_t start_x = 0;
     int16_t start_y = 0;
     int16_t last_x = 0;
     int16_t last_y = 0;
     uint64_t started_ms = 0;
+    std::optional<uint64_t> release_started_ms;
 };
 
 struct Boot {

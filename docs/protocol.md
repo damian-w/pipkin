@@ -205,10 +205,15 @@ provider cards open their detail pages. Losing a provider's readings returns its
 page to Overview. A saved page preference may wait for initial data.
 
 Horizontal swipes need 60 pixels of movement, at least twice the vertical
-movement; taps and holds allow 12 pixels. Hold the header clock for 1.2 seconds
-to open status. The whole header row accepts the hold because the clock position
-varies by page. Releasing the opening hold does not close status; a later tap,
-swipe or one minute without touch returns to the selected normal page.
+movement; taps allow 12 pixels of drift from the starting point in either axis.
+Hold anywhere on the screen for three seconds to open status/About. Holds allow
+25 pixels of drift in either axis; swipes and larger drags cancel the hold.
+Contact gaps shorter than 100 ms preserve the gesture; a release is confirmed
+after 100 ms. Opening requires a pressed sample at or after the three-second
+threshold, so releasing early does not open status.
+Releasing the opening hold leaves status open; a later tap, swipe or one minute
+without touch returns to the selected normal page. The first touch of a dark
+screen only wakes it.
 
 Only changes to the selected normal page are persisted. Page entry and touch
 times use the monotonic clock. Gauges animate for 650 ms after page changes or

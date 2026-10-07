@@ -1,0 +1,92 @@
+<h1 align="center">Pipkin</h1>
+
+<p align="center"><strong>Your AI coding allowance, at a glance.</strong></p>
+
+<p align="center">
+  <img src="docs/images/badge-works-with-codex.svg" alt="Works with Codex" height="28">
+  <img src="docs/images/badge-works-with-claude-code.svg" alt="Works with Claude Code" height="28">
+</p>
+
+<p align="center">
+  <img src="docs/images/pipkin.png" alt="Pipkin, with Pip peeking over its top edge, moving from its overview to the Codex and Claude Code gauges" width="640">
+</p>
+
+Pipkin is a small desk display for people who build with Codex and Claude Code. It
+sits beside your keyboard and shows how much of your session and weekly allowance is
+left, and when it resets, so you never have to open a settings page mid-flow or get
+caught out by a limit.
+
+## What it shows
+
+- **Overview:** Codex and Claude Code side by side, with session and weekly
+  allowance for each.
+- **Codex** and **Claude Code:** large, easy-to-read gauges with a countdown to each
+  reset, plus any banked resets.
+- **The time**, on every page.
+
+Percentages show what you have **left**, with amber gauges when you're running low. Pipkin
+is honest about what it knows: if a reading is out of date, or an app hasn't reported
+something, the display says so rather than guessing.
+
+<p align="center">
+  <img src="docs/images/low.png" alt="The overview with allowances running low" width="400">
+  <img src="docs/images/status.png" alt="The status page" width="400">
+</p>
+
+Swipe or tap to move between pages; Pipkin remembers your favourite. Hold the clock for
+a status page. When no new readings arrive for a while, as when your computer is off or
+asleep, the screen dims and then goes dark. It lights up again as soon as a new reading
+arrives, or for a minute at a touch.
+
+## Getting started
+
+1. Install the [Pipkin CLI](https://github.com/damian-w/pipkin-cli), which reads your
+   allowance and sends it to the display. It starts automatically each time you sign in
+   to your computer. Step-by-step help is at [pipkin.io/start](https://pipkin.io/start).
+2. Plug Pipkin into your computer with the USB cable.
+
+<p align="center">
+  <img src="docs/images/boot.png" alt="Pip riding the loading bar while Pipkin starts up, then hopping as the overview appears" width="400">
+</p>
+
+The CLI lives in its own repository, which covers installation, everyday commands,
+privacy and exactly what it reads. This repository holds the display's firmware and
+interface.
+
+## Compatibility
+
+The CLI supports macOS, Linux and Windows on ARM64 and Intel/AMD 64-bit.
+See its [data sources and compatibility](https://github.com/damian-w/pipkin-cli/blob/main/docs/data-sources.md)
+for supported sign-ins and credential stores.
+
+## Build your own
+
+Pipkin runs on an ESP32 "Cheap Yellow Display" board, and its firmware is published
+here. See [building and developing Pipkin](docs/development.md) and the
+[protocol reference](docs/protocol.md).
+
+<p>
+  <img src="docs/images/badge-licence.svg" alt="Licence: noncommercial" height="28">
+  <img src="docs/images/badge-board.svg" alt="Board: ESP32 CYD" height="28">
+  <img src="docs/images/badge-runs-on.svg" alt="Runs on macOS, Linux and Windows" height="28">
+</p>
+
+## Licence
+
+Pipkin's firmware, CLI, installers and documentation are source-available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). You may use, build, modify and share
+them for noncommercial purposes, including personal use, study and hobby projects.
+Include the licence and its `Required Notice` line when sharing. Selling Pipkin or
+products built from it needs separate permission.
+
+If you own a Pipkin, whether a kit or one you've built yourself, you may also use this
+software with it for any purpose, including paid work. See the
+[terms of use](https://pipkin.io/terms).
+
+Third-party components keep their own licences; see the
+[firmware notices](https://github.com/damian-w/pipkin/blob/main/assets/NOTICE.md) and
+[CLI notices](https://github.com/damian-w/pipkin-cli/blob/main/NOTICE.md).
+
+Codex is a trademark of OpenAI. Claude and Claude Code are trademarks of Anthropic.
+Pipkin is an independent product and is not affiliated with or endorsed by either
+company.

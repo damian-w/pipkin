@@ -1,9 +1,45 @@
 # Building and developing Pipkin
 
-This guide is for DIY builders and contributors. If you have a Pipkin kit, the
-[README](../README.md) is all you need.
+This guide is for DIY builders and contributors. If you have a Pipkin kit, start
+with the [README](../README.md).
 
 ## Firmware
+
+### Install a firmware release
+
+Install the [Pipkin CLI](https://github.com/damian-w/pipkin-cli), connect a supported
+board with a USB data cable, then run:
+
+```sh
+pipkin flash
+```
+
+CLI **1.1.0 or later** downloads the latest published stable firmware and the pinned
+Espressif flashing tool, checks the connected board and current firmware, and shows
+the plan before asking for yes/no confirmation. Enter means no. You do not need
+Python or ESP-IDF for this route. The same command updates an existing Pipkin;
+`pipkin update` updates the CLI itself.
+
+The target is an **ESP32 CYD 2.8-inch touch board with 4 MB flash** matching the
+existing [board profile](#board-profile). Equivalent ESP32-S and WROOM boards use
+the same firmware; a printed model label does not need to match exactly. The profile
+is provisional and still needs qualification on physical boards. USB checks can
+identify the ESP chip and flash, but not the attached screen or touch hardware. A
+board with unknown or other firmware needs your confirmation that it is the intended
+CYD. Installing Pipkin replaces that firmware and its saved application settings.
+Compatible Pipkin updates and recovery of recognized stored Pipkin firmware retain
+the selected display page. A stored version is not proof that the firmware is running;
+use `pipkin flash --reinstall` to repair the same version when it does not respond.
+An incompatible existing Pipkin partition layout is rejected before writing.
+
+Firmware releases are created as drafts until hardware qualification is complete.
+The CLI uses only published stable releases with compatible flash artifacts. See
+the [CLI firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md)
+for selecting a port or version, deliberate reinstalls and USB recovery. Firmware
+has a single application slot and no automatic rollback; rerun `pipkin flash` after
+an interrupted write.
+
+### Build firmware from source
 
 Pipkin builds with ESP-IDF **v5.4.2** (commit
 `f5c3654a1c2d2a01f7f67def7a0dc48e691f63c0`). Follow
@@ -19,6 +55,11 @@ idf.py -p PORT flash
 Replace `PORT` with the board's serial port. The build checks the SDK version and
 target, enables reproducible builds and path remapping, and strips debug sections
 to keep build-machine paths out of the binary.
+
+If the Pipkin helper is running, use `pipkin stop` before `idf.py -p PORT flash`
+so it releases the serial port, then `pipkin start` afterward. If it was already
+stopped, leave it stopped. This source-build route remains available for modified
+firmware and development.
 
 ## Tests
 
@@ -53,6 +94,12 @@ profile: ILI9341 LCD, XPT2046 resistive touch, 320 × 240 landscape, 4 MB flash.
 assignments, touch calibration, display orientation, SPI speed and backlight
 polarity all live there. They have not yet been confirmed on production hardware,
 so check them against your board before flashing.
+
+Equivalent 2.8-inch touch CYD boards with ESP32-S or WROOM modules use this same
+profile when their wiring and screen hardware match [main/board.h](../main/board.h).
+Module branding or a printed model label alone does not require a separate firmware
+profile. The current drivers and pin assignments remain the compatibility boundary;
+other screen hardware or ESP32-S3 boards need their own implementation and qualification.
 
 ## Display
 
@@ -95,8 +142,8 @@ change independently when a port is opened. The Pipkin CLI keeps the port open t
 repeated restarts, and resends everything if it detects one. This behaviour still
 needs qualification on production boards.
 
-## Not yet available
+## Remaining hardware work
 
-- Firmware updates through the CLI. Firmware is currently flashed with ESP-IDF.
 - Application rollback: the flash layout has a single application slot.
-- Hardware qualification of touch accuracy, USB behaviour and host sleep signalling.
+- Hardware qualification of touch accuracy, USB behaviour, first-time flashing,
+  firmware updates and host sleep signalling.

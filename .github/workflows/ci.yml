@@ -18,6 +18,8 @@ jobs:
           c++ $flags src/model.cpp src/protocol.cpp tests/core_test.cpp -o core && ./core
           c++ $flags src/model.cpp src/render.cpp tests/render_check.cpp -o render && ./render
           c++ $flags -Imain tests/hardware_check.cpp -o hardware && ./hardware
+      - name: Firmware packaging checks
+        run: python3 -B -m unittest discover -s tests -p '*_test.py'
 
   firmware:
     runs-on: ubuntu-24.04
@@ -31,3 +33,6 @@ jobs:
           . "$IDF_PATH/export.sh"
           idf.py set-target esp32
           idf.py build
+      - name: Validate release assets
+        shell: bash
+        run: python3 -B scripts/package_firmware.py --output-dir "$RUNNER_TEMP/firmware"

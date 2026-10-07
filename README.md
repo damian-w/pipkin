@@ -67,25 +67,20 @@ for supported sign-ins and credential stores.
 
 ## Build your own
 
-Pipkin runs on **ESP32 CYD 2.8-inch touch boards with 4 MB flash** that match its
-current firmware profile. Equivalent ESP32-S and WROOM boards use the same profile;
-the printed product label does not need to match exactly. The profile is provisional
-and still needs physical hardware qualification. Check the
-[board guide](docs/development.md#board-profile) for its wiring and driver requirements.
+Pipkin uses an **ESP32 “Cheap Yellow Display” (CYD)** board, available online for
+roughly **$17 USD / $25 AUD**. [This AliExpress listing](https://www.aliexpress.com/item/1005009383089648.html)
+is one example.
 
-You can install a published firmware release with the CLI, without setting up
-ESP-IDF or Python:
+Install the CLI, connect your board with a USB data cable, then run:
 
 ```sh
 pipkin flash
 ```
 
-Install the CLI, connect your board with a USB data cable, then check the board and
-flash plan before confirming. A board without Pipkin firmware needs your confirmation
-that it is the intended ESP32 CYD 2.8-inch touch board. See
-[building and developing Pipkin](docs/development.md) for the board notes
-and the full source-build route, and the [protocol reference](docs/protocol.md) for
-USB integrations.
+Pipkin checks the board, shows the firmware version it will install, and asks for
+yes/no confirmation before flashing.
+
+You can also [build and flash the firmware from source](docs/development.md#build-firmware-from-source).
 
 <p>
   <img src="docs/images/badge-licence.svg" alt="Licence: noncommercial" height="28">

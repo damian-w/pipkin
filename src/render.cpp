@@ -40,20 +40,20 @@ unsigned remaining(const Window& window, uint64_t now, double progress) {
     return static_cast<unsigned>((1000 - shown_used(window, now)) * progress + 0.5);
 }
 
-bool known_stale(const Freshness& freshness, uint64_t now) {
-    const auto age = freshness.observation_age_ms(now);
-    return age && *age >= kStaleAfterMs;
+bool session_visible(const ProviderData& provider) {
+    const auto session = provider.session.state;
+    return session != AllowanceState::NoCap &&
+           !(usable(provider.weekly) &&
+             (session == AllowanceState::Unknown || session == AllowanceState::Unsupported));
 }
 
-bool session_visible(const ProviderData& provider) {
-    const auto& session = provider.session;
-    const auto& weekly = provider.weekly;
-    const bool has_weekly = (weekly.state == AllowanceState::Metered && weekly.used_tenths) ||
-                            weekly.state == AllowanceState::NotStarted ||
-                            weekly.state == AllowanceState::NoCap;
-    return session.state != AllowanceState::NoCap &&
-           !(has_weekly && (session.state == AllowanceState::Unknown ||
-                            session.state == AllowanceState::Unsupported));
+bool linked(const State& state) {
+    return state.transport_connected && state.host != HostState::Disconnected;
+}
+
+// Seconds since the epoch in local time; validated times are always positive.
+int64_t local_time(const State& state, int64_t unix) {
+    return unix + state.clock.utc_offset_minutes * 60;
 }
 
 uint16_t blend(uint16_t below, uint16_t above, int alpha) {
@@ -250,8 +250,7 @@ struct Canvas {
             }
     }
     void gauge(int cx, int cy, int radius, const Window& window, uint64_t now, double progress) {
-        const bool metered = window.state == AllowanceState::Metered && window.used_tenths;
-        const float fraction = metered ? remaining(window, now, progress) / 1000.0f : 0;
+        const float fraction = metered(window) ? remaining(window, now, progress) / 1000.0f : 0;
         arc(cx, cy, radius - 2.5f, 3, 0, 1, track);
         if (fraction > 0)
             arc(cx, cy, radius - 2.5f, 3, 0, fraction, tone(window));
@@ -279,6 +278,15 @@ void provider_mark(Canvas& c, int index, int x, int y) {
 
 const char* provider_name(int index) { return index == 0 ? "Codex" : "Claude Code"; }
 
+void provider_title(Canvas& c, int index, int y) {
+    provider_mark(c, index, 16, y);
+    c.text(40, y - 1, provider_name(index), font::size14, foreground);
+}
+
+const char* setup_hint(const State& state) {
+    return linked(state) ? "Sign in to Codex or Claude Code" : "Set up at pipkin.io/start";
+}
+
 // Unknown sessions need a label; a confirmed uncapped session does not.
 const char* session_note(const ProviderData& p) {
     switch (p.session.state) {
@@ -293,7 +301,7 @@ const char* session_note(const ProviderData& p) {
 
 void percentage(const Window& window, uint64_t now, double progress, char* out,
                 std::size_t length) {
-    if (window.state == AllowanceState::Metered && window.used_tenths)
+    if (metered(window))
         std::snprintf(out, length, "%u%%", (remaining(window, now, progress) + 5) / 10);
     else
         std::snprintf(out, length, "--");
@@ -357,11 +365,10 @@ void countdown(const State& state, const Window& w, uint64_t now, char* out, std
     // A day or more away, the local day and time read better than a long countdown.
     if (left >= 86400 && left < 7 * 86400) {
         static constexpr const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-        const int64_t local = *w.reset_unix + state.clock.utc_offset_minutes * 60;
-        const int64_t day = local >= 0 ? local / 86400 : (local - 86399) / 86400;
-        const int64_t second = local - day * 86400;
+        const int64_t local = local_time(state, *w.reset_unix);
+        const int64_t second = local % 86400;
         // 1 January 1970 was a Thursday.
-        std::snprintf(out, length, "Resets %s %02d:%02d", days[((day + 4) % 7 + 7) % 7],
+        std::snprintf(out, length, "Resets %s %02d:%02d", days[(local / 86400 + 4) % 7],
                       static_cast<int>(second / 3600), static_cast<int>(second % 3600 / 60));
     } else if (left >= 86400)
         std::snprintf(out, length, "Reset in %lldd %lldh", static_cast<long long>(left / 86400),
@@ -385,7 +392,7 @@ const char* freshness(const ProviderData& p, uint64_t now) {
         if (!w->freshness.observed_unix && w->state == AllowanceState::Unknown)
             continue;
         observed = true;
-        if (known_stale(w->freshness, now))
+        if (w->freshness.known_stale(now))
             return "Stale reading";
     }
     if (!observed)
@@ -415,23 +422,18 @@ void banked(Canvas& c, const ProviderData& p, int index, int middle, uint64_t no
     std::snprintf(text, sizeof(text), "%u reset%s", static_cast<unsigned>(*p.banked_resets),
                   *p.banked_resets == 1 ? "" : "s");
     pill(c, 48 + c.width(provider_name(index), font::size14), middle, text,
-         known_stale(p.banked_freshness, now) ? caution : secondary);
+         p.banked_freshness.known_stale(now) ? caution : secondary);
 }
 
 void clock_text(Canvas& c, const State& state, uint64_t now, bool centred) {
     char value[16] = "--:--";
     if (auto time = unix_now(state, now)) {
-        auto local = *time + state.clock.utc_offset_minutes * 60;
-        auto day = (local % 86400 + 86400) % 86400;
-        std::snprintf(value, sizeof(value), "%02u:%02u", static_cast<unsigned>(day / 3600),
-                      static_cast<unsigned>(day / 60 % 60));
+        const auto second = local_time(state, *time) % 86400;
+        std::snprintf(value, sizeof(value), "%02u:%02u", static_cast<unsigned>(second / 3600),
+                      static_cast<unsigned>(second / 60 % 60));
     }
     const auto& size = font::size12;
-    int digit = 0;
-    for (char character = '0'; character <= '9'; ++character) {
-        const char text[] = {character, 0};
-        digit = std::max(digit, c.width(text, size));
-    }
+    const int digit = cell(size);
     constexpr int colon = 4;
     int x = centred ? (kDisplayWidth - digit * 4 - colon) / 2 : 304 - digit * 4 - colon;
     for (int i = 0; i < 5; ++i) {
@@ -466,8 +468,7 @@ void bar(Canvas& c, int x, int y, int width, const Window& w, uint64_t now, doub
 }
 
 void provider_heading(Canvas& c, const ProviderData& p, int index, int y, uint64_t now) {
-    provider_mark(c, index, 16, y);
-    c.text(40, y - 1, provider_name(index), font::size14, foreground);
+    provider_title(c, index, y);
     banked(c, p, index, y + 8, now);
     if (const char* status = freshness(p, now))
         c.right(304, y + 2, status, font::size11, caution);
@@ -485,8 +486,8 @@ void overview_window(Canvas& c, const State& state, int x, int y, int width, con
     const int baseline = y + (expanded ? 48 : 38);
     char reset[40];
     countdown(state, w, now, reset, sizeof(reset));
-    const auto reset_color = known_stale(w.freshness, now) ? caution : secondary;
-    if (w.state == AllowanceState::Metered && w.used_tenths) {
+    const auto reset_color = w.freshness.known_stale(now) ? caution : secondary;
+    if (metered(w)) {
         char value[16];
         percentage(w, now, progress, value, sizeof(value));
         c.text(x, baseline - (expanded ? 35 : 24), value, number, figure(w));
@@ -515,33 +516,37 @@ void provider_row(Canvas& c, const State& state, int index, int y, bool expanded
                         session_note(p));
 }
 
-void detail_window(Canvas& c, const State& state, const Window& w, int cx, int cy, int radius,
-                   const font::Font& number, int number_top, int note_top, bool weekly,
-                   uint64_t now, double progress) {
+// Two dials share a detail page; a lone weekly dial is larger.
+struct Dial {
+    int radius;
+    const font::Font& number;
+    int number_top;
+    int note_top;
+};
+constexpr Dial kPairedDial{58, font::size36, -30, 10};
+constexpr Dial kLoneDial{64, font::size48, -40, 14};
+
+void detail_window(Canvas& c, const State& state, const Window& w, bool weekly, int cx, int cy,
+                   const Dial& dial, uint64_t now, double progress) {
     char value[40];
     window_label(w, weekly, value, sizeof(value));
-    c.centered(cx, cy - radius - 25, value, font::size14, secondary);
-    c.gauge(cx, cy, radius, w, now, progress);
-    if (w.state == AllowanceState::Metered && w.used_tenths) {
+    c.centered(cx, cy - dial.radius - 25, value, font::size14, secondary);
+    c.gauge(cx, cy, dial.radius, w, now, progress);
+    if (metered(w)) {
         percentage(w, now, progress, value, sizeof(value));
-        c.centered(cx, cy + number_top, value, number, figure(w));
-        c.centered(cx, cy + note_top, "remaining", font::size10, secondary);
+        c.centered(cx, cy + dial.number_top, value, dial.number, figure(w));
+        c.centered(cx, cy + dial.note_top, "remaining", font::size10, secondary);
     } else
         c.centered(cx, cy - 7, state_label(w), font::size14, foreground);
     countdown(state, w, now, value, sizeof(value));
-    c.centered(cx, cy + radius * 7 / 10 + 12, value, font::size11,
-               known_stale(w.freshness, now) ? caution : secondary);
-}
-
-void heading(Canvas& c, int index) {
-    provider_mark(c, index, 16, 8);
-    c.text(40, 7, provider_name(index), font::size14, foreground);
+    c.centered(cx, cy + dial.radius * 7 / 10 + 12, value, font::size11,
+               w.freshness.known_stale(now) ? caution : secondary);
 }
 
 void detail(Canvas& c, const State& state, uint64_t now, double progress) {
     const int index = effective_page(state) == Page::Codex ? 0 : 1;
     const auto& p = state.providers[index];
-    heading(c, index);
+    provider_title(c, index, 8);
     banked(c, p, index, 16, now);
     const char* footer = connection(state);
     if (!footer)
@@ -551,10 +556,10 @@ void detail(Canvas& c, const State& state, uint64_t now, double progress) {
     // The dials sit midway between the heading and the page dots, rising to make room for a note.
     const int cy = footer ? 127 : 133;
     if (session_visible(p)) {
-        detail_window(c, state, p.session, 84, cy, 58, font::size36, -30, 10, false, now, progress);
-        detail_window(c, state, p.weekly, 236, cy, 58, font::size36, -30, 10, true, now, progress);
+        detail_window(c, state, p.session, false, 84, cy, kPairedDial, now, progress);
+        detail_window(c, state, p.weekly, true, 236, cy, kPairedDial, now, progress);
     } else
-        detail_window(c, state, p.weekly, 160, cy, 64, font::size48, -40, 14, true, now, progress);
+        detail_window(c, state, p.weekly, true, 160, cy, kLoneDial, now, progress);
     if (footer)
         c.centered(160, 203, footer, font::size11, caution);
 }
@@ -575,8 +580,7 @@ void status_dot(Canvas& c, int x, int middle, uint16_t color) {
 
 // Keep observation age distinct from receipt age when the source time is unknown.
 void provider_status(Canvas& c, const ProviderData& p, int index, int y, uint64_t now) {
-    provider_mark(c, index, 16, y);
-    c.text(40, y - 1, provider_name(index), font::size14, foreground);
+    provider_title(c, index, y);
     const auto& window = p.weekly.state == AllowanceState::Unknown ||
                                  p.weekly.state == AllowanceState::Unsupported
                              ? p.session
@@ -614,7 +618,7 @@ void provider_status(Canvas& c, const ProviderData& p, int index, int y, uint64_
         std::snprintf(text, sizeof(text), "Received %s ago", age);
     }
     c.right(304, y + 2, text, font::size11,
-            known_stale(window.freshness, now) ? caution : secondary);
+            window.freshness.known_stale(now) ? caution : secondary);
 }
 
 void about(Canvas& c, const State& state, uint64_t now) {
@@ -633,10 +637,7 @@ void about(Canvas& c, const State& state, uint64_t now) {
                        : alive                                 ? "Connected"
                        : state.host == HostState::Asleep       ? "Computer asleep"
                                                                : "Connected, not confirmed";
-    const auto dot = !state.transport_connected || state.host == HostState::Disconnected
-                         ? depleted
-                     : alive ? accent
-                             : caution;
+    const auto dot = !linked(state) ? depleted : alive ? accent : caution;
     c.rect(16, 38, 288, 1, track);
     status_dot(c, 16, 59, dot);
     c.text(31, 52, host, font::size12, foreground);
@@ -651,10 +652,6 @@ void about(Canvas& c, const State& state, uint64_t now) {
     x += c.width("Run", font::size11) + 6;
     x += pill(c, x, 207, "pipkin status", foreground) + 6;
     c.text(x, 200, "for details", font::size11, secondary);
-}
-
-bool linked(const State& state) {
-    return state.transport_connected && state.host != HostState::Disconnected;
 }
 
 // Animation keys use milliseconds since boot, or since finish for the closing sequence.
@@ -760,7 +757,7 @@ void boot(Canvas& c, const State& state, uint64_t now) {
     const bool riding = finishing ? f < 1440 : t >= 1280 && t < 2720;
     const bool crawling = !finishing && t >= 2720 && t < 3520;
 
-    const Key closing[] = {{3520, 1}, {4000, 0}};
+    const Key closing[] = {{3520, 1}, {kBootFinishMs, 0}};
     const float out = finishing ? keyed(f, closing) : 1;
     const Key rise[] = {{720, 40}, {1040, -4}, {1240, 0}};
     const Key hop[] = {{1520, 0},  {1920, -24}, {2080, -24}, {2400, 0},
@@ -836,16 +833,13 @@ void boot(Canvas& c, const State& state, uint64_t now) {
     const Key starting[] = {{640, 0}, {960, 1}, {2560, 1}, {2720, 0}};
     const Key waiting[] = {{2720, 0}, {2960, 1}};
     const Key done[] = {{1520, 0}, {1760, 1}, {3360, 1}, {3680, 0}};
-    const bool connected = linked(state);
     if (const float a = keyed(t, starting) * earlier; a > 0)
         c.centered(160, 188, "Starting up", font::size12, fade(secondary, a));
     if (const float a = keyed(t, waiting) * earlier; a > 0)
-        c.centered(160, 188, connected ? "Waiting for usage" : "Looking for your computer",
+        c.centered(160, 188, linked(state) ? "Waiting for usage" : "Looking for your computer",
                    font::size12, fade(secondary, a));
     if (!finishing && since >= kBootHintMs)
-        c.centered(160, 208,
-                   connected ? "Sign in to Codex or Claude Code" : "Set up at pipkin.io/start",
-                   font::size11, secondary);
+        c.centered(160, 208, setup_hint(state), font::size11, secondary);
     if (const float a = finishing ? keyed(f, done) : 0; a > 0)
         c.centered(160, 188, "All set", font::size12, fade(secondary, a));
 }
@@ -896,16 +890,13 @@ void render(const State& state, uint64_t now_ms, uint16_t* pixels, int first_row
     const auto progress = reveal(state, now_ms);
     const bool overview = effective_page(state) == Page::Overview;
     if (!codex && !claude) {
-        const bool connected = linked(state);
-        c.centered(160, 100, connected ? "Waiting for usage" : "Waiting for your computer",
+        c.centered(160, 100, linked(state) ? "Waiting for usage" : "Waiting for your computer",
                    font::size14, foreground);
-        c.centered(160, 124,
-                   connected ? "Sign in to Codex or Claude Code" : "Set up at pipkin.io/start",
-                   font::size11, secondary);
+        c.centered(160, 124, setup_hint(state), font::size11, secondary);
     } else if (overview) {
         if (codex && claude) {
             provider_row(c, state, 0, 38, false, now_ms, progress);
-            c.rect(16, 123, 288, 1, hairline);
+            c.rect(16, kOverviewSplit, 288, 1, hairline);
             provider_row(c, state, 1, 134, false, now_ms, progress);
         } else
             provider_row(c, state, codex ? 0 : 1, 66, true, now_ms, progress);

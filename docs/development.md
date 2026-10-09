@@ -21,24 +21,17 @@ Python or ESP-IDF for this route. The same command updates an existing Pipkin;
 `pipkin update` updates the CLI itself.
 
 The target is an **ESP32 CYD 2.8-inch touch board with 4 MB flash** matching the
-existing [board profile](#board-profile). The tested physical variants are recorded
-in the [board catalog](../boards/profiles.json). Equivalent ESP32-S and WROOM-style
-boards use the same firmware when their wiring matches. Display and touch operation
-have been confirmed on the recorded variants. USB checks can
-identify the ESP chip and flash, but not the attached screen or touch hardware. A
-board with unknown or other firmware needs your confirmation that it is the intended
-CYD. Installing Pipkin replaces that firmware and its saved application settings.
-Compatible Pipkin updates and recovery of recognized stored Pipkin firmware retain
-the selected display page. A stored version is not proof that the firmware is running;
-use `pipkin flash --reinstall` to repair the same version when it does not respond.
-An incompatible existing Pipkin partition layout is rejected before writing.
+[board profile](#board-profile). USB checks can identify the ESP chip and flash, but
+not the attached screen or touch hardware, so a board with unknown or other firmware
+needs your confirmation that it is the intended CYD. Installing Pipkin replaces that
+firmware and its saved application settings. Pipkin updates keep the selected display
+page, and an incompatible existing partition layout is rejected before writing.
 
-Firmware releases are created as drafts for maintainer review and qualification.
-The CLI uses only published stable releases with compatible flash artifacts. See
-the [CLI firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md)
-for selecting a port or version, deliberate reinstalls and USB recovery. Firmware
-has a single application slot and no automatic rollback; rerun `pipkin flash` after
-an interrupted write.
+Firmware releases are created as drafts for maintainer review and qualification; the
+CLI uses only published stable releases. Firmware has a single application slot and no
+automatic rollback; rerun `pipkin flash` after an interrupted write. See the
+[CLI firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md)
+for selecting a port or version, reinstalling and USB recovery.
 
 ### Build firmware from source
 
@@ -64,12 +57,11 @@ firmware and development.
 
 ## Tests
 
-The display logic, protocol and renderer are tested without hardware:
+The display logic, protocol, renderer and release packaging are tested without
+hardware:
 
 ```sh
-c++ -std=c++17 -Wall -Wextra -Werror -Iinclude src/model.cpp src/protocol.cpp tests/core_test.cpp -o /tmp/pipkin-core && /tmp/pipkin-core
-c++ -std=c++17 -Wall -Wextra -Werror -Iinclude src/model.cpp src/render.cpp tests/render_check.cpp -o /tmp/pipkin-render && /tmp/pipkin-render
-c++ -std=c++17 -Wall -Wextra -Werror -Iinclude -Imain tests/hardware_check.cpp -o /tmp/pipkin-hardware && /tmp/pipkin-hardware
+scripts/check.sh
 ```
 
 `tests/fixtures/helper_packets.txt` is a copy of
@@ -78,7 +70,9 @@ c++ -std=c++17 -Wall -Wextra -Werror -Iinclude -Imain tests/hardware_check.cpp -
 accept every packet in it, so the two sides of the protocol cannot drift apart. After an
 intended protocol change, regenerate the fixture in the CLI repository and copy it here.
 
-CI runs these on every push, along with a firmware build.
+CI runs the checks and a firmware build on every push and pull request. Pushing a
+`v*` tag that matches `PROJECT_VER` in `CMakeLists.txt` also packages the firmware
+and creates a draft release.
 
 ## Layout
 
@@ -107,9 +101,7 @@ profile. The current drivers and pin assignments remain the compatibility bounda
 other screen hardware or ESP32-S3 boards need their own implementation and qualification.
 
 See [Board profiles and identification](board-profiles.md) for the contributor
-report workflow and adding another physical variant. Firmware 1.3.0 uses the
-canonical profile ID and requires CLI 1.4.0; the old provisional ID remains an
-alias for compatible updates.
+report workflow, profile aliases and adding another physical variant.
 
 ## Display
 

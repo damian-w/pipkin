@@ -34,31 +34,6 @@ RUNTIME_NOTICES = [
     "gcc/COPYING.RUNTIME",
     "newlib/COPYING.NEWLIB",
 ]
-TLSF_NOTICE = """TLSF allocator: Copyright (c) 2006-2016, 2024 Matthew Conte
-
-Redistribution and use in source and binary forms, with or without modification,
-are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-3. Neither the name of the copyright holder nor the names of its contributors
-   may be used to endorse or promote products derived from this software without
-   specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
-ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""
 
 
 def require(condition, message):
@@ -142,7 +117,7 @@ def validate_application(data, version, revision):
             "application: missing ESP-IDF app description")
     require(c_string(data[48:80]) == version, "application: firmware version differs from release tag")
     require(c_string(data[80:112]) == "pipkin", "application: project name is not pipkin")
-    require(c_string(data[144:176]) == SDK_VERSION, "application: expected ESP-IDF v5.4.2")
+    require(c_string(data[144:176]) == SDK_VERSION, f"application: expected ESP-IDF {SDK_VERSION}")
     require(revision[:12].encode("ascii") + b"\0" in data,
             "application: source revision differs from the selected Git commit; rebuild first")
 
@@ -172,18 +147,19 @@ def validate_partitions(data):
             "partition table: does not match esp32-single-app-v1; NVS must not move")
 
 
-def third_party_notices(project):
+def third_party_notices(project, source_dir):
     sdk = Path(project["idf_path"])
     compiler = Path(project["c_compiler"]).resolve()
     runtime = compiler.parent.parent / "share/licenses"
-    sections = ["Pipkin firmware third-party notices\nESP-IDF v5.4.2; Mbed TLS uses its Apache-2.0 option.\n"]
+    sections = [f"Pipkin firmware third-party notices\nESP-IDF {SDK_VERSION}; Mbed TLS uses its Apache-2.0 option.\n"]
     for root, prefix, names in [(sdk, "ESP-IDF", SDK_NOTICES),
                                 (runtime, "Toolchain runtime", RUNTIME_NOTICES)]:
         for name in names:
             text = (root / name).read_text(encoding="utf-8")
             require(text.strip(), f"Missing licence text: {prefix}/{name}")
             sections.append(f"\n===== {prefix}/{name} =====\n\n{text.rstrip()}\n")
-    sections.append(f"\n===== TLSF (BSD-3-Clause) =====\n\n{TLSF_NOTICE}")
+    tlsf = (source_dir / "assets/TLSF-BSD-3-Clause.txt").read_text(encoding="utf-8")
+    sections.append(f"\n===== TLSF (BSD-3-Clause) =====\n\n{tlsf}")
     # Xtensa's MIT terms and copyright years are in its source headers.
     xtensa = sdk / "components/xtensa/esp32/include/xtensa/config/core-isa.h"
     text = xtensa.read_text(encoding="utf-8")
@@ -208,7 +184,7 @@ def package(build_dir, output_dir, source_dir, revision, tag=None):
     require(project["project_name"] == "pipkin" and project["target"] == "esp32",
             "expected a pipkin ESP32 build")
     config = json.loads((build_dir / "flasher_args.json").read_text())
-    settings = {"flash_mode": "dio", "flash_freq": "40m", "flash_size": "4MB"}
+    settings = {"flash_mode": profile["flash_mode"], "flash_freq": profile["flash_freq"], "flash_size": "4MB"}
     require(config["flash_settings"] == settings, "flash settings differ from the initial board profile")
     args = config["write_flash_args"]
     require(len(args) == 6 and {args[i]: args[i + 1] for i in range(0, 6, 2)} ==
@@ -252,7 +228,7 @@ def package(build_dir, output_dir, source_dir, revision, tag=None):
     payloads["NOTICE.md"] = (source_dir / "assets/NOTICE.md").read_text().replace(
         "[LICENSE](../LICENSE)", "[LICENSE](LICENSE)").encode("utf-8")
     payloads["Inter-OFL.txt"] = (source_dir / "assets/Inter-OFL.txt").read_bytes()
-    payloads["third-party-notices.txt"] = third_party_notices(project)
+    payloads["third-party-notices.txt"] = third_party_notices(project, source_dir)
     payloads["SHA256SUMS"] = "".join(
         f"{hashlib.sha256(data).hexdigest()}  {name}\n"
         for name, data in sorted(payloads.items())).encode("ascii")

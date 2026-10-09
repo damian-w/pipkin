@@ -8,6 +8,15 @@
 
 namespace pipkin {
 
+constexpr int kDisplayWidth = 320;
+constexpr int kDisplayHeight = 240;
+// Touch regions follow the rendered layout.
+constexpr int kHeaderBottom = 32;
+constexpr int kOverviewSplit = 123;
+constexpr int kNavigationTop = 208;
+// Supported wall-clock range in Unix seconds.
+constexpr int64_t kMinUnix = 1577836800;
+constexpr int64_t kMaxUnix = 4102444800;
 constexpr std::size_t kMaxPacketBytes = 768;
 constexpr uint64_t kStaleAfterMs = 5 * 60 * 1000;
 constexpr uint64_t kHostLivenessMs = 60 * 1000;
@@ -43,12 +52,12 @@ struct Freshness {
     std::optional<uint64_t> last_observed_age_ms;
 
     std::optional<uint64_t> observation_age_ms(uint64_t now_ms) const;
-    bool stale(uint64_t now_ms) const;
+    // An unknown observation age is never reported as stale.
+    bool known_stale(uint64_t now_ms) const;
 };
 
 struct Window {
     AllowanceState state = AllowanceState::Unknown;
-    std::array<char, 33> id{};
     std::optional<uint16_t> used_tenths;
     std::optional<int64_t> reset_unix;
     std::optional<uint32_t> duration_seconds;
@@ -131,6 +140,11 @@ bool host_alive(const State& state, uint64_t now_ms);
 double transition(uint64_t start_ms, uint64_t now_ms);
 uint16_t shown_used(const Window& window, uint64_t now_ms);
 bool changing(const Window& window, uint64_t now_ms);
+bool metered(const Window& window);
+// Metered, uncapped or not started: enough to show the window.
+bool usable(const Window& window);
+// Restarts the page reveal.
+void view_changed(State& state, uint64_t now_ms);
 bool ingest(State& state, std::string_view line, uint64_t now_ms);
 bool provider_visible(const State& state, Provider provider);
 VisiblePages visible_pages(const State& state);

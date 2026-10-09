@@ -6,7 +6,6 @@ idf_component_register(
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
-file(GLOB_RECURSE git_heads CONFIGURE_DEPENDS "${PROJECT_DIR}/.git/refs/heads/*")
 execute_process(COMMAND git -C "${PROJECT_DIR}" rev-parse --verify HEAD
     RESULT_VARIABLE git_result OUTPUT_QUIET ERROR_QUIET)
 if(git_result EQUAL 0)

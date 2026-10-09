@@ -9,6 +9,7 @@
 #include "esp_lcd_panel_io.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "pipkin/model.h"
 
 #include <algorithm>
 #include <array>
@@ -16,8 +17,8 @@
 
 namespace {
 
-constexpr int kWidth = 320;
-constexpr int kHeight = 240;
+constexpr int kWidth = pipkin::kDisplayWidth;
+constexpr int kHeight = pipkin::kDisplayHeight;
 constexpr std::size_t kBandBytes = kWidth * kDisplayBandRows * sizeof(uint16_t);
 
 esp_lcd_panel_io_handle_t lcd;

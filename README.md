@@ -11,82 +11,81 @@
   <img src="docs/images/pipkin.png" alt="Pipkin, with Pip peeking over its top edge, moving from its overview to the Codex and Claude Code gauges" width="640">
 </p>
 
-Pipkin is a small desk display for people who build with Codex and Claude Code. It
-sits beside your keyboard and shows how much of your session and weekly allowance is
-left, and when it resets, so you never have to open a settings page mid-flow or get
-caught out by a limit.
+Pipkin is a little screen for your desk that shows how much of your Claude and Codex
+usage you have left, and when it resets. One glance tells you whether there's room
+for another big task, so you're not digging through settings or hitting a limit
+halfway through something.
 
-## What it shows
+## What you'll see
 
-- **Overview:** Codex and Claude Code side by side, with session and weekly
-  allowance for each.
-- **Codex** and **Claude Code:** large, easy-to-read gauges with a countdown to each
-  reset, plus any banked resets.
-- **The time**, on every page.
+- **Overview:** Claude and Codex side by side, with your current session and your
+  week.
+- **A page for each:** big, easy-to-read dials with a countdown to the next reset.
+- **The time**, up in the corner.
 
-Percentages show what you have **left**, with amber gauges when you're running low. Pipkin
-is honest about what it knows: if a reading is out of date, or an app hasn't reported
-something, the display says so rather than guessing.
+The numbers show what you have **left**. A gauge turns amber when you're running low
+and red once it's used up. If a reading is out of date, or an app hasn't checked in,
+Pipkin says so rather than guessing. Claude's page is labelled Claude Code, but it
+shows your Claude plan's usage whichever Claude app you use.
 
 <p align="center">
   <img src="docs/images/low.png" alt="The overview with allowances running low" width="400">
   <img src="docs/images/status.png" alt="The status page" width="400">
 </p>
 
-Swipe or tap to move between pages; Pipkin remembers your favourite. Hold anywhere on
-the screen for three seconds to open the About/status page. Lift your finger, then tap
-or swipe to return; it also closes after a minute untouched. Pipkin follows your
-computer's sleep and shutdown, and screen sleep on macOS and Windows. It wakes
-automatically on resume or when the helper starts at sign-in. Linux power events
-require systemd-logind. If a sleep/shutdown report is missed or the helper stops,
-the screen goes dark after 90 seconds without a helper heartbeat. Stale readings
-still dim and then go dark while the helper is connected. Touch wakes that dark
-screen for a minute; the first touch only wakes it. Explicit host sleep keeps the
-screen off until the host wakes.
+## Using it
+
+Swipe left or right, or tap the bottom edge of the screen, to move between pages. Tap
+Claude or Codex on the overview to open its page. Pipkin remembers where you left it.
+
+Hold your finger anywhere on the screen for three seconds to open the status page.
+It shows whether Pipkin can see your computer and how recent each reading is. Lift
+your finger, then tap to go back. It also closes by itself after a minute.
+
+Pipkin sleeps when your computer sleeps and wakes up with it. If it stops hearing
+from your computer, or the readings get old, the screen dims or switches off. Touch
+it to light it up again for a minute.
 
 ## Getting started
 
-1. Install the [Pipkin CLI](https://github.com/damian-w/pipkin-cli), which reads your
-   allowance and sends it to the display. It starts automatically each time you sign in
-   to your computer. Step-by-step help is at [pipkin.io/start](https://pipkin.io/start).
-2. Plug Pipkin into your computer with the USB cable.
+1. Install the Pipkin helper on your Mac, Windows or Linux computer. It's a single
+   command pasted into Terminal (or PowerShell on Windows), and
+   [pipkin.io/start](https://pipkin.io/start) walks you through it.
+2. Plug Pipkin in with its USB cable.
+
+That's it. The helper runs quietly in the background and starts whenever you sign in
+to your computer. It uses the sign-ins from the Claude and Codex apps you already
+have, so there's no new account or password. Those sign-ins are only ever used to ask
+Claude and Codex for your usage, and Pipkin doesn't track you.
 
 <p align="center">
   <img src="docs/images/boot.png" alt="Pip riding the loading bar while Pipkin starts up, then hopping as the overview appears" width="400">
 </p>
 
-The CLI lives in its own repository, which covers installation, everyday commands,
-privacy and exactly what it reads. This repository holds the display's firmware and
-interface.
+For the details, including exactly what the helper reads, see the
+[Pipkin CLI](https://github.com/damian-w/pipkin-cli) and its
+[data sources and privacy](https://github.com/damian-w/pipkin-cli/blob/main/docs/data-sources.md)
+guide.
 
-To update the display later, run `pipkin flash`. It checks the attached board and
-current firmware, shows the latest published stable firmware version, and asks for
-yes/no confirmation before writing. `pipkin update` updates the CLI itself. Flashing
-requires CLI 1.4.0 or later for the latest firmware; see the
-[firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md).
+## Keeping it up to date
 
-## Compatibility
-
-The CLI supports macOS, Linux and Windows on ARM64 and Intel/AMD 64-bit.
-See its [data sources and compatibility](https://github.com/damian-w/pipkin-cli/blob/main/docs/data-sources.md)
-for supported sign-ins and credential stores.
-
-## Build your own
-
-Pipkin uses an **ESP32 “Cheap Yellow Display” (CYD)** board, available online for
-roughly **$17 USD / $25 AUD**. [This AliExpress listing](https://www.aliexpress.com/item/1005009383089648.html)
-is one example.
-
-Install the CLI, connect your board with a USB data cable, then run:
+Every so often there's new software for the screen itself. To install it, open
+Terminal and run:
 
 ```sh
 pipkin flash
 ```
 
-Pipkin checks the board, shows the firmware version it will install, and asks for
-yes/no confirmation before flashing.
+Pipkin shows you what it's about to install and waits for you to say yes.
 
-You can also [build and flash the firmware from source](docs/development.md#build-firmware-from-source).
+## Build your own
+
+Pipkin runs on an ESP32 "Cheap Yellow Display" (CYD), a small touchscreen board that
+costs around US$17 / A$25 online. [This AliExpress listing](https://www.aliexpress.com/item/1005009383089648.html)
+is one example. Install the helper, plug the board in with a USB data cable and run
+`pipkin flash`.
+
+To build the firmware yourself, see the [developer guide](docs/development.md).
 
 <p>
   <img src="docs/images/badge-licence.svg" alt="Licence: noncommercial" height="28">

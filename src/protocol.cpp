@@ -8,9 +8,6 @@
 namespace pipkin {
 namespace {
 
-constexpr int64_t kFirstEpoch = 1577836800;
-constexpr int64_t kLastEpoch = 4102444800;
-
 struct Token {
     std::string_view key;
     std::string_view value;
@@ -81,15 +78,13 @@ bool number(std::optional<std::string_view> text, T minimum, T maximum, T& value
     return true;
 }
 
-bool identifier(std::string_view text, std::array<char, 33>& output) {
+bool identifier(std::string_view text) {
     if (text.empty() || text.size() > 32 || text == "null")
         return false;
     for (const char c : text)
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
               c == '-' || c == '_' || c == '.'))
             return false;
-    output.fill(0);
-    std::copy(text.begin(), text.end(), output.begin());
     return true;
 }
 
@@ -118,13 +113,9 @@ bool freshness(Freshness& result, const Freshness& previous, std::optional<int64
     result.observed_unix = observed;
     result.received_ms = now_ms;
     result.observation_epoch = state.clock.observation_epoch;
-    const auto now = unix_now(state, now_ms);
-    if (now && observed) {
-        if (*observed > *now + 30)
-            return false;
+    if (const auto now = unix_now(state, now_ms); now && observed)
         result.age_on_receipt_ms =
             static_cast<uint64_t>(std::max<int64_t>(0, *now - *observed)) * 1000;
-    }
     if (observed && observed == watermark && previous_age)
         result.age_on_receipt_ms = std::max(*previous_age, result.age_on_receipt_ms.value_or(0));
     result.last_observed_unix = observed ? observed : watermark;
@@ -139,13 +130,14 @@ bool window(const Packet& packet, bool session, Window& result, const Window& pr
     const auto used = packet.get(session ? "session_used" : "weekly_used");
     const auto reset = packet.get(session ? "session_reset" : "weekly_reset");
     const auto seconds = packet.get(session ? "session_seconds" : "weekly_seconds");
+    const bool details = id || used || reset || seconds;
     if (!status)
-        return !id && !used && !reset && !seconds;
+        return !details;
     result = Window{};
     if (!freshness(result.freshness, previous.freshness, observed, state, now_ms))
         return false;
     if (status == "null")
-        return !id && !used && !reset && !seconds;
+        return !details;
     if (status == "metered")
         result.state = AllowanceState::Metered;
     else if (status == "no_cap" && session)
@@ -157,8 +149,8 @@ bool window(const Packet& packet, bool session, Window& result, const Window& pr
     else
         return false;
     if (result.state == AllowanceState::NoCap || result.state == AllowanceState::Unsupported)
-        return !id && !used && !reset && !seconds;
-    if (!id || !identifier(*id, result.id))
+        return !details;
+    if (!id || !identifier(*id))
         return false;
     if (result.state == AllowanceState::Metered) {
         uint16_t value = 0;
@@ -174,7 +166,7 @@ bool window(const Packet& packet, bool session, Window& result, const Window& pr
         return false;
     if (reset && reset != "null") {
         int64_t value = 0;
-        if (!number<int64_t>(reset, kFirstEpoch, kLastEpoch, value))
+        if (!number<int64_t>(reset, kMinUnix, kMaxUnix, value))
             return false;
         result.reset_unix = value;
     }
@@ -211,9 +203,10 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
         data.app_received_ms = now_ms;
         return true;
     }
-    std::array<char, 33> account_id{};
-    if (!identifier(*account, account_id))
+    if (!identifier(*account))
         return false;
+    std::array<char, 33> account_id{};
+    std::copy(account->begin(), account->end(), account_id.begin());
     const bool same_account = data.account == account_id;
     if (mode == "patch" && !same_account)
         return false;
@@ -226,7 +219,7 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
     std::optional<int64_t> observed;
     if (packet.get("observed") != "null") {
         int64_t value = 0;
-        if (!number<int64_t>(packet.get("observed"), kFirstEpoch, kLastEpoch, value))
+        if (!number<int64_t>(packet.get("observed"), kMinUnix, kMaxUnix, value))
             return false;
         observed = value;
     }
@@ -253,7 +246,6 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
     const auto banked = packet.get("banked");
     if (banked) {
         data.banked_resets.reset();
-        data.banked_freshness = Freshness{};
         if (!freshness(data.banked_freshness, previous.banked_freshness, observed, state, now_ms))
             return false;
         if (banked != "null") {
@@ -275,7 +267,7 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
             return false;
         int64_t epoch = 0;
         int16_t offset = 0;
-        if (!number<int64_t>(packet.get("unix"), kFirstEpoch, kLastEpoch, epoch) ||
+        if (!number<int64_t>(packet.get("unix"), kMinUnix, kMaxUnix, epoch) ||
             !number<int16_t>(packet.get("tz"), -840, 840, offset))
             return false;
         const auto rebase = packet.get("rebase");
@@ -363,15 +355,14 @@ bool ingest(State& state, std::string_view line, uint64_t now_ms) {
     next.transport_connected = true;
     if (!apply(packet, next, now_ms))
         return false;
-    if ((state.page == Page::Codex && provider_visible(state, Provider::Codex) &&
-         !provider_visible(next, Provider::Codex)) ||
-        (state.page == Page::Claude && provider_visible(state, Provider::Claude) &&
-         !provider_visible(next, Provider::Claude)))
+    const auto lost = [&](Page page, Provider provider) {
+        return state.page == page && provider_visible(state, provider) &&
+               !provider_visible(next, provider);
+    };
+    if (lost(Page::Codex, Provider::Codex) || lost(Page::Claude, Provider::Claude))
         next.page = selected_page(next);
-    if (effective_page(next) != effective_page(state)) {
-        next.page_entered_ms = now_ms;
-        ++next.view_revision;
-    }
+    if (effective_page(next) != effective_page(state))
+        view_changed(next, now_ms);
     if (next.host == HostState::Disconnected)
         next.transport_connected = false;
     if (sequenced)

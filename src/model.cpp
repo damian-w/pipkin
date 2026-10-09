@@ -14,17 +14,16 @@ std::optional<uint64_t> Freshness::observation_age_ms(uint64_t now_ms) const {
     return elapsed > maximum - *age_on_receipt_ms ? maximum : elapsed + *age_on_receipt_ms;
 }
 
-bool Freshness::stale(uint64_t now_ms) const {
+bool Freshness::known_stale(uint64_t now_ms) const {
     const auto age = observation_age_ms(now_ms);
-    return !age || *age >= kStaleAfterMs;
+    return age && *age >= kStaleAfterMs;
 }
 
 std::optional<int64_t> unix_now(const State& state, uint64_t now_ms) {
     if (!state.clock.anchor_unix || now_ms < state.clock.anchor_ms)
         return std::nullopt;
     const uint64_t elapsed = (now_ms - state.clock.anchor_ms) / 1000;
-    constexpr int64_t last_supported_second = 4102444800;
-    if (elapsed > static_cast<uint64_t>(last_supported_second - *state.clock.anchor_unix))
+    if (elapsed > static_cast<uint64_t>(kMaxUnix - *state.clock.anchor_unix))
         return std::nullopt;
     return *state.clock.anchor_unix + static_cast<int64_t>(elapsed);
 }
@@ -51,6 +50,20 @@ uint16_t shown_used(const Window& window, uint64_t now_ms) {
         from + (*window.used_tenths - from) * transition(window.changed_ms, now_ms) + 0.5);
 }
 
+bool metered(const Window& window) {
+    return window.state == AllowanceState::Metered && window.used_tenths.has_value();
+}
+
+bool usable(const Window& window) {
+    return metered(window) || window.state == AllowanceState::NoCap ||
+           window.state == AllowanceState::NotStarted;
+}
+
+void view_changed(State& state, uint64_t now_ms) {
+    state.page_entered_ms = now_ms;
+    ++state.view_revision;
+}
+
 bool host_alive(const State& state, uint64_t now_ms) {
     return state.transport_connected && state.host == HostState::Awake && state.host_received_ms &&
            now_ms >= *state.host_received_ms && now_ms - *state.host_received_ms < kHostLivenessMs;
@@ -61,10 +74,6 @@ bool provider_visible(const State& state, Provider provider) {
     if (index >= state.providers.size())
         return false;
     const auto& data = state.providers[index];
-    const auto usable = [](const Window& window) {
-        return (window.state == AllowanceState::Metered && window.used_tenths.has_value()) ||
-               window.state == AllowanceState::NoCap || window.state == AllowanceState::NotStarted;
-    };
     return usable(data.session) || usable(data.weekly) || data.banked_resets.value_or(0) > 0;
 }
 
@@ -94,10 +103,8 @@ void restore_page(State& state, Page page, uint64_t now_ms) {
         return;
     const auto previous = effective_page(state);
     state.page = page;
-    if (effective_page(state) != previous) {
-        state.page_entered_ms = now_ms;
-        ++state.view_revision;
-    }
+    if (effective_page(state) != previous)
+        view_changed(state, now_ms);
 }
 
 Page selected_page(const State& state) {
@@ -112,9 +119,23 @@ constexpr int kHoldMovementPx = 25;
 void show_about(State& state, bool open, uint64_t now_ms) {
     if (state.about_open != open) {
         state.about_open = open;
-        state.page_entered_ms = now_ms;
-        ++state.view_revision;
+        view_changed(state, now_ms);
     }
+}
+
+bool on_screen(int x, int y) {
+    return x >= 0 && x < kDisplayWidth && y >= 0 && y < kDisplayHeight;
+}
+
+// A tap or swipe first closes About; navigating needs a second page.
+bool navigable(State& state, uint64_t now_ms) {
+    if (state.overlay != Overlay::None)
+        return false;
+    if (state.about_open) {
+        show_about(state, false, now_ms);
+        return false;
+    }
+    return visible_pages(state).count > 1;
 }
 
 void finish_touch(State& state, uint64_t now_ms) {
@@ -133,34 +154,23 @@ void finish_touch(State& state, uint64_t now_ms) {
 } // namespace
 
 void tap(State& state, int x, int y, uint64_t now_ms) {
-    if (state.overlay != Overlay::None || x < 0 || x >= 320 || y < 0 || y >= 240)
+    if (!on_screen(x, y) || !navigable(state, now_ms))
         return;
-    if (state.about_open) {
-        show_about(state, false, now_ms);
-        return;
-    }
     const auto page = effective_page(state);
     const auto pages = visible_pages(state);
-    if (pages.count == 1)
-        return;
-    if (y >= 208)
-        swipe(state, x < 160 ? -1 : 1, now_ms);
-    else if (page == Page::Overview && y >= 32 && y < (pages.count == 2 ? 208 : 123))
+    const int first_end = pages.count == 2 ? kNavigationTop : kOverviewSplit;
+    if (y >= kNavigationTop)
+        swipe(state, x < kDisplayWidth / 2 ? -1 : 1, now_ms);
+    else if (page == Page::Overview && y >= kHeaderBottom && y < first_end)
         restore_page(state, pages.pages[1], now_ms);
-    else if (page == Page::Overview && pages.count == 3 && y >= 123 && y < 208)
+    else if (page == Page::Overview && pages.count == 3 && y >= kOverviewSplit)
         restore_page(state, pages.pages[2], now_ms);
 }
 
 void swipe(State& state, int direction, uint64_t now_ms) {
-    if (state.overlay != Overlay::None || (direction != -1 && direction != 1))
+    if ((direction != -1 && direction != 1) || !navigable(state, now_ms))
         return;
-    if (state.about_open) {
-        show_about(state, false, now_ms);
-        return;
-    }
     const auto pages = visible_pages(state);
-    if (pages.count == 1)
-        return;
     const auto page = selected_page(state);
     for (int i = 0; i < pages.count; ++i) {
         if (pages.pages[static_cast<std::size_t>(i)] == page) {
@@ -173,7 +183,7 @@ void swipe(State& state, int direction, uint64_t now_ms) {
 
 void touch(State& state, bool pressed, int x, int y, uint64_t now_ms) {
     auto& gesture = state.gesture;
-    if (state.overlay != Overlay::None || (pressed && (x < 0 || x >= 320 || y < 0 || y >= 240)) ||
+    if (state.overlay != Overlay::None || (pressed && !on_screen(x, y)) ||
         (gesture.active && now_ms < gesture.started_ms) ||
         (gesture.release_started_ms && now_ms < *gesture.release_started_ms)) {
         gesture = TouchGesture{};
@@ -241,8 +251,7 @@ void idle(State& state, uint64_t now_ms) {
         boot.ready_ms = now_ms;
     if (const auto finish = boot_finish_ms(boot); finish && now_ms >= *finish + kBootFinishMs) {
         boot.active = false;
-        state.page_entered_ms = now_ms;
-        ++state.view_revision;
+        view_changed(state, now_ms);
     }
 }
 

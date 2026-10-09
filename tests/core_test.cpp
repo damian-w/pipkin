@@ -43,12 +43,12 @@ void state_and_merge() {
     auto& data = feed.state.providers[0];
     assert(data.session.used_tenths == 640 && data.weekly.used_tenths == 220);
     assert(data.banked_resets == 0);
-    assert(data.session.freshness.stale(0));
+    assert(!data.session.freshness.observation_age_ms(0));
     assert(feed.state.host == HostState::Unknown && feed.state.transport_connected);
     assert(feed.send("kind=clock unix=1800000600 tz=480", 600000));
     assert(feed.send(snapshot, 600000));
     assert(data.session.freshness.observation_age_ms(600000) == 600000);
-    assert(data.session.freshness.stale(600000));
+    assert(data.session.freshness.known_stale(600000));
     assert(feed.send(patch + "1800000610 weekly=metered weekly_id=week-a weekly_used=330", 610000));
     assert(data.session.freshness.received_ms == 600000);
     assert(data.weekly.freshness.received_ms == 610000);
@@ -168,7 +168,7 @@ void clock_freshness_and_liveness() {
     assert(feed.send("kind=clock unix=1800000010 tz=480", 310000));
     assert(feed.send(snapshot, 310000));
     assert(data.session.freshness.observation_age_ms(310000) == 310000);
-    assert(data.session.freshness.stale(310000));
+    assert(data.session.freshness.known_stale(310000));
     assert(feed.send("kind=clock unix=1799999000 tz=-300 rebase=1", 311000));
     assert(feed.state.clock.utc_offset_minutes == -300);
     assert(data.session.freshness.observation_age_ms(311000) == 311000);
@@ -212,12 +212,12 @@ void unknown_observation_age() {
     const auto& data = feed.state.providers[0];
     assert(data.session.used_tenths == 650 && !data.session.freshness.observed_unix);
     assert(!data.session.freshness.observation_age_ms(310000));
-    assert(data.session.freshness.stale(310000));
+    assert(!data.session.freshness.known_stale(310000));
     assert(!feed.send(patch + "1799999999 session=null", 310000));
     assert(!feed.send(patch + "1799999999 banked=0", 310000));
     assert(feed.send(snapshot, 310000));
     assert(data.session.freshness.observation_age_ms(310000) == 310000);
-    assert(data.session.freshness.stale(310000));
+    assert(data.session.freshness.known_stale(310000));
     assert(feed.send("kind=usage provider=claude mode=full account=sample-c observed=null "
                      "session=no_cap weekly=unsupported",
                      310000));
@@ -328,7 +328,7 @@ void conditional_provider_visibility() {
                      "session=metered session_id=period-c session_used=0"));
     const auto revision = feed.state.view_revision;
     assert(feed.send("kind=app provider=claude state=unavailable", 600000));
-    assert(feed.state.providers[1].session.freshness.stale(600000));
+    assert(feed.state.providers[1].session.freshness.known_stale(600000));
     assert(provider_visible(feed.state, Provider::Claude));
     assert(selected_page(feed.state) == Page::Claude && feed.state.view_revision == revision);
     assert(feed.send(

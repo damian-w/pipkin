@@ -15,11 +15,8 @@ constexpr int64_t epoch = 1800000000;
 struct Feed {
     State state;
     uint64_t sequence = 0;
-    bool send(const std::string& fields, uint64_t now = 0, int version = 1) {
-        return ingest(state,
-                      "v=" + std::to_string(version) + " seq=" + std::to_string(++sequence) + " " +
-                          fields,
-                      now);
+    bool send(const std::string& fields, uint64_t now = 0) {
+        return ingest(state, "v=2 seq=" + std::to_string(++sequence) + " " + fields, now);
     }
     void clock() { assert(send("kind=clock unix=1800000000 tz=480")); }
 };
@@ -83,8 +80,8 @@ void accounts_and_ordering() {
     feed.clock();
     assert(feed.send(snapshot));
     const auto old_sequence = feed.state.last_sequence;
-    assert(!ingest(feed.state, "v=1 seq=" + std::to_string(old_sequence) + " " + snapshot, 0));
-    assert(!ingest(feed.state, "v=1 seq=1 " + snapshot, 0));
+    assert(!ingest(feed.state, "v=2 seq=" + std::to_string(old_sequence) + " " + snapshot, 0));
+    assert(!ingest(feed.state, "v=2 seq=1 " + snapshot, 0));
     assert(!feed.send(
         "kind=usage provider=codex mode=patch account=sample-b observed=1800000000 banked=9"));
     assert(feed.send("kind=app provider=codex state=available"));
@@ -94,7 +91,7 @@ void accounts_and_ordering() {
     assert(data.session.state == AllowanceState::Unknown && !data.banked_resets);
     assert(data.weekly.state == AllowanceState::Unsupported && data.app == AppState::Unknown);
     assert(std::string(data.account.data()) == "sample-b");
-    assert(!ingest(feed.state, "v=1 seq=" + std::to_string(old_sequence) + " " + snapshot, 0));
+    assert(!ingest(feed.state, "v=2 seq=" + std::to_string(old_sequence) + " " + snapshot, 0));
     assert(feed.send("kind=app provider=codex state=signed_out"));
     assert(data.account[0] == 0 && data.weekly.state == AllowanceState::Unknown);
     assert(!feed.send(
@@ -149,10 +146,12 @@ void reject_invalid_packets() {
         assert(feed.state.providers[0].banked_resets == 0);
     }
     assert(!ingest(feed.state, std::string(kMaxPacketBytes + 1, 'a'), 0));
-    assert(!ingest(feed.state, "v=2 seq=999 kind=host state=awake", 0));
-    assert(!ingest(feed.state, "v=1 seq=0 kind=host state=awake", 0));
-    assert(!ingest(feed.state, "v=1 seq=18446744073709551616 kind=host state=awake", 0));
-    assert(!ingest(feed.state, "v=1 seq=999 kind=host state=aw\xc3\xa1ke", 0));
+    assert(!ingest(feed.state, "v=1 seq=999 kind=host state=awake", 0));
+    assert(!ingest(feed.state, "v=3 seq=999 kind=host state=awake", 0));
+    assert(!ingest(feed.state, "seq=999 kind=host state=awake", 0));
+    assert(!ingest(feed.state, "v=2 seq=0 kind=host state=awake", 0));
+    assert(!ingest(feed.state, "v=2 seq=18446744073709551616 kind=host state=awake", 0));
+    assert(!ingest(feed.state, "v=2 seq=999 kind=host state=aw\xc3\xa1ke", 0));
     assert(!feed.send(patch + "1800000031 banked=0"));
     assert(feed.send(usage + "session=metered session_id=next session_used=1000"));
     assert(feed.state.providers[0].session.used_tenths == 1000);
@@ -770,16 +769,15 @@ void host_power_backlight() {
     assert(noisy.state.host == HostState::Awake);
 }
 
-// Task records arrived in protocol 2 and stay apart from allowance, liveness and visibility.
+// Task records stay apart from allowance, liveness and visibility.
 void task_counts() {
     Feed feed;
     feed.clock();
     const std::string codex = "kind=tasks provider=codex coverage=partial observed=1800000000 ";
     const std::string counts = codex + "working=2 attention=1 blocked=0";
     const auto& tasks = feed.state.tasks[0];
-    assert(!feed.send(counts));
-    assert(!feed.send("kind=host state=awake", 0, 2));
-    assert(feed.send(counts, 0, 2));
+    assert(!ingest(feed.state, "v=1 " + counts, 0));
+    assert(feed.send(counts));
     assert(tasks.coverage == TaskCoverage::Partial && tasks.working == 2 &&
            tasks.attention == 1 && tasks.blocked == 0);
     assert(tasks_current(tasks, kTaskFreshMs - 1) && !tasks_current(tasks, kTaskFreshMs));
@@ -802,22 +800,21 @@ void task_counts() {
           std::string("kind=tasks provider=other coverage=unavailable observed=1800000000"),
           std::string("kind=tasks provider=codex coverage=complete observed=1800000000 "
                       "working=1 attention=0 blocked=0")}) {
-        assert(!feed.send(fields, 0, 2));
+        assert(!feed.send(fields, 0));
         assert(feed.state.last_sequence == good_sequence && tasks.working == 2);
     }
 
     // Age follows the source observation, not packet receipt.
-    assert(feed.send(codex + "working=0 attention=0 blocked=1", 1000, 2));
+    assert(feed.send(codex + "working=0 attention=0 blocked=1", 1000));
     assert(tasks.blocked == 1 && tasks.working == 0);
     assert(tasks_current(tasks, kTaskFreshMs - 1) && !tasks_current(tasks, kTaskFreshMs));
 
     // Allowance sign-out leaves tasks alone; only partial coverage is current.
     assert(feed.send("kind=app provider=codex state=signed_out", 2000));
     assert(tasks_current(tasks, 2000));
-    assert(feed.send(unavailable + "1800000002", 2000, 2));
+    assert(feed.send(unavailable + "1800000002", 2000));
     assert(tasks.coverage == TaskCoverage::Unavailable && !tasks_current(tasks, 2000));
-    assert(feed.send("kind=tasks provider=claude coverage=unsupported observed=1800000002", 2000,
-                     2));
+    assert(feed.send("kind=tasks provider=claude coverage=unsupported observed=1800000002", 2000));
     assert(feed.state.tasks[1].coverage == TaskCoverage::Unsupported);
 
     // Sleep, disconnect and clock rebases clear counts; awake heartbeats do not.
@@ -825,45 +822,45 @@ void task_counts() {
         return "kind=tasks provider=codex coverage=partial observed=" +
                std::to_string(1800000000 + second) + " working=1 attention=0 blocked=0";
     };
-    assert(feed.send(observed(3), 3000, 2));
+    assert(feed.send(observed(3), 3000));
     assert(feed.send("kind=host state=awake", 3000));
     assert(tasks_current(tasks, 3000));
     assert(feed.send("kind=host state=asleep", 3000));
     assert(tasks.coverage == TaskCoverage::Unknown);
     assert(feed.send("kind=host state=awake", 4000));
-    assert(feed.send(observed(4), 4000, 2));
+    assert(feed.send(observed(4), 4000));
     assert(feed.send("kind=host state=disconnected", 4000));
     assert(tasks.coverage == TaskCoverage::Unknown);
     assert(feed.state.tasks[1].coverage == TaskCoverage::Unknown);
-    assert(feed.send(observed(5), 5000, 2));
+    assert(feed.send(observed(5), 5000));
     assert(feed.send("kind=clock unix=1800000005 tz=480 rebase=1", 5000));
     assert(tasks.coverage == TaskCoverage::Unknown);
-    assert(!feed.send(observed(5), 5000, 2));
+    assert(!feed.send(observed(5), 5000));
     const auto epoch = std::to_string(feed.state.clock.observation_epoch);
-    assert(feed.send(observed(5) + " clock_epoch=" + epoch, 5000, 2));
+    assert(feed.send(observed(5) + " clock_epoch=" + epoch, 5000));
     assert(tasks_current(tasks, 5000));
 
     // Without a synchronized clock the age is unknown, so nothing is current.
     Feed unsynced;
-    assert(unsynced.send(counts, 0, 2));
+    assert(unsynced.send(counts, 0));
     assert(unsynced.state.tasks[0].coverage == TaskCoverage::Partial);
     assert(!tasks_current(unsynced.state.tasks[0], 0));
 }
 
 void unsequenced_senders() {
     State state;
-    assert(ingest(state, "v=1 kind=clock unix=1800000000 tz=0", 0));
-    assert(ingest(state, "v=1 " + snapshot, 1000));
+    assert(ingest(state, "v=2 kind=clock unix=1800000000 tz=0", 0));
+    assert(ingest(state, "v=2 " + snapshot, 1000));
     assert(state.last_sequence == 0 && state.providers[0].session.used_tenths == 640);
-    assert(ingest(state, "v=1 seq=5 kind=host state=awake", 2000));
-    assert(ingest(state, "v=1 kind=usage provider=claude mode=full account=sample-c "
+    assert(ingest(state, "v=2 seq=5 kind=host state=awake", 2000));
+    assert(ingest(state, "v=2 kind=usage provider=claude mode=full account=sample-c "
                          "observed=1800000001 weekly=metered weekly_id=week-c weekly_used=100",
                   3000));
     assert(state.last_sequence == 5);
-    assert(!ingest(state, "v=1 seq=5 kind=host state=awake", 4000));
-    assert(!ingest(state, "v=1 seq= kind=host state=awake", 4000));
-    assert(!ingest(state, "v=1 " + patch + "1799999999 banked=3", 4000));
-    assert(!ingest(state, "v=1 kind=clock unix=1800000000 tz=0 rebase=1", 4000));
+    assert(!ingest(state, "v=2 seq=5 kind=host state=awake", 4000));
+    assert(!ingest(state, "v=2 seq= kind=host state=awake", 4000));
+    assert(!ingest(state, "v=2 " + patch + "1799999999 banked=3", 4000));
+    assert(!ingest(state, "v=2 kind=clock unix=1800000000 tz=0 rebase=1", 4000));
     assert(state.providers[0].banked_resets == 0);
 }
 

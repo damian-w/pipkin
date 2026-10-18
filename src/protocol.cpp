@@ -389,8 +389,7 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
 bool ingest(State& state, std::string_view line, uint64_t now_ms) {
     Packet packet;
     uint64_t sequence = 0;
-    // Task records arrived in protocol 2; every other kind keeps its protocol 1 version.
-    if (!tokenize(line, packet) || packet.get("v") != (packet.get("kind") == "tasks" ? "2" : "1") ||
+    if (!tokenize(line, packet) || packet.get("v") != kProtocolVersion ||
         now_ms < state.last_received_ms)
         return false;
     // Sequence is optional so stateless senders need no identify round trip; usage ordering is

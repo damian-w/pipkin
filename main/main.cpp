@@ -59,13 +59,12 @@ void identity(const pipkin::State& state, uint64_t now) {
     if (const auto time = pipkin::unix_now(state, now))
         std::snprintf(unix_time, sizeof(unix_time), "%" PRId64, *time);
     char reply[256];
-    const int count =
-        std::snprintf(reply, sizeof(reply),
-                      "v=1 kind=identity product=pipkin firmware=%s chip=esp32 board=%s "
-                      "hardware=%s protocol_min=1 protocol_max=2 seq=%" PRIu64
-                      " clock_epoch=%" PRIu64 " unix=%s\n",
-                      esp_app_get_description()->version, board::kProfile, board::kHardware,
-                      state.last_sequence, state.clock.observation_epoch, unix_time);
+    const int count = std::snprintf(
+        reply, sizeof(reply),
+        "v=" PIPKIN_PROTOCOL " kind=identity product=pipkin firmware=%s board=%s seq=%" PRIu64
+        " clock_epoch=%" PRIu64 " unix=%s\n",
+        esp_app_get_description()->version, board::kProfile, state.last_sequence,
+        state.clock.observation_epoch, unix_time);
     if (count > 0 && count < static_cast<int>(sizeof(reply))) {
         ESP_ERROR_CHECK(uart_write_bytes(UART_NUM_0, reply, count) == count ? ESP_OK : ESP_FAIL);
     }
@@ -127,7 +126,7 @@ extern "C" void app_main() {
         ESP_ERROR_CHECK(count >= 0 ? ESP_OK : ESP_FAIL);
         for (int i = 0; i < count; ++i) {
             reader.push(bytes[i], [&](std::string_view line) {
-                if (line == "v=1 kind=identify") {
+                if (line == pipkin::kIdentifyRequest) {
                     identity(state, now);
                 } else if (pipkin::ingest(state, line, now)) {
                     dirty = true;

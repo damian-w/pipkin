@@ -14,9 +14,10 @@ atomically. Stream receivers must discard an oversized record through its line
 ending; they must not parse its tail as a new record. Integers are decimal,
 without a leading plus sign, fractional part, or exponent.
 
-Every state-changing record requires `kind` and the protocol version that defined
-it: `v=2` for task records and `v=1` for every other kind. A positive unsigned 64-bit
-`seq` is optional. When present, sequence numbers must increase across all
+Every state-changing record requires `kind` and `v=2`. The protocol version is the
+major version shared by the firmware and the CLI: firmware 2.x and CLI 2.x speak
+version 2, and records with any other version are rejected. A positive unsigned
+64-bit `seq` is optional. When present, sequence numbers must increase across all
 providers and message kinds for the current device boot; duplicates and lower
 sequence numbers are rejected. Records without `seq` do not change the stored
 sequence, so stateless senders can write without first querying the device.
@@ -36,23 +37,26 @@ The hardware transport handles this read-only discovery request without
 resetting the device or requiring a sequence:
 
 ```text
-v=1 kind=identify
+v=2 kind=identify
 ```
 
-Its response includes `v=1 kind=identity product=pipkin`, firmware version,
-compiled firmware board profile, the supported `protocol_min` and `protocol_max`,
-the last accepted `seq`, current `clock_epoch`, and the device's current `unix`
-time, or `null` before clock synchronization. Current firmware reports
-`protocol_min=1 protocol_max=2`; firmware reporting `protocol_max=1` predates task
-records. A lower `seq` than a sender last used indicates the device restarted and
-lost volatile state.
-Identity replies do not authorize flashing; this protocol has no firmware-update
-or rollback commands.
+The response carries the firmware version, the compiled board profile, the last
+accepted `seq`, the current `clock_epoch`, and the device's current `unix` time,
+or `null` before clock synchronization:
+
+```text
+v=2 kind=identity product=pipkin firmware=2.0.0 board=esp32-2432s028r seq=0 clock_epoch=0 unix=null
+```
+
+A lower `seq` than a sender last used indicates the device restarted and lost
+volatile state. Firmware with another major version doesn't answer, so the CLI
+treats the display as needing `pipkin flash`. Identity replies do not authorize
+flashing; this protocol has no firmware-update or rollback commands.
 
 ## Clock
 
 ```text
-v=1 kind=clock seq=1 unix=1800000000 tz=480
+v=2 kind=clock seq=1 unix=1800000000 tz=480
 ```
 
 `unix` is the host's current UTC epoch second, between 1577836800 and 4102444800
@@ -79,8 +83,8 @@ re-observe the source, never retag cached readings as a new epoch.
 ## Host and application status
 
 ```text
-v=1 kind=host seq=2 state=awake
-v=1 kind=app seq=3 provider=codex state=available
+v=2 kind=host seq=2 state=awake
+v=2 kind=app seq=3 provider=codex state=available
 ```
 
 Host states are `awake`, `asleep`, and `disconnected`. Only an explicit,
@@ -120,7 +124,7 @@ Closing or losing an application may retain its last known readings.
 ## Usage snapshots and patches
 
 ```text
-v=1 kind=usage seq=4 provider=codex mode=full account=sample-a observed=1800000000 session=metered session_id=period-a session_used=640 session_reset=1800003600 session_seconds=18000 weekly=metered weekly_id=week-a weekly_used=220 weekly_reset=1800604800 weekly_seconds=604800 banked=0
+v=2 kind=usage seq=4 provider=codex mode=full account=sample-a observed=1800000000 session=metered session_id=period-a session_used=640 session_reset=1800003600 session_seconds=18000 weekly=metered weekly_id=week-a weekly_used=220 weekly_reset=1800604800 weekly_seconds=604800 banked=0
 ```
 
 `provider` is `codex` or `claude`. `account` is a non-identifying opaque
@@ -195,8 +199,8 @@ durations from carrying into a new window. A state must accompany its group
 members. `session=null` differs from omitting `session` in a patch:
 
 ```text
-v=1 kind=usage seq=5 provider=codex mode=patch account=sample-a observed=1800000010 banked=null
-v=1 kind=usage seq=6 provider=codex mode=patch account=sample-a observed=1800000020 session=null
+v=2 kind=usage seq=5 provider=codex mode=patch account=sample-a observed=1800000010 banked=null
+v=2 kind=usage seq=6 provider=codex mode=patch account=sample-a observed=1800000020 session=null
 ```
 
 The first clears only the reset balance. The second also clears session data;
@@ -206,20 +210,17 @@ weekly information remains unchanged in both.
 
 `banked` is an authoritative integer count from 0 through 1000000 or `null`.
 Zero is a known zero balance; null is unknown. Do not infer this count from
-optional detail rows or purchased credits. Version 1 has no reset actions.
+optional detail rows or purchased credits. The protocol has no reset actions.
 
 An explicit full snapshot with `account=null` clears every reading and marks
 the application unavailable. No observation timestamp or usage fields are
 allowed with it:
 
 ```text
-v=1 kind=usage seq=7 provider=codex mode=full account=null
+v=2 kind=usage seq=7 provider=codex mode=full account=null
 ```
 
 ## Local tasks
-
-Protocol 2 adds one record kind. Send it only when the identity reply reports
-`protocol_max` of 2 or more; earlier firmware rejects it.
 
 ```text
 v=2 kind=tasks seq=8 provider=codex coverage=partial observed=1800000000 working=2 attention=1 blocked=0

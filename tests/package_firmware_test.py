@@ -102,8 +102,7 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(manifest["source_revision"], REVISION)
         self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["board"], "esp32-2432s028r")
-        self.assertEqual(manifest["hardware"], "confirmed")
-        self.assertEqual(manifest["minimum_cli"], "1.6.1")
+        self.assertEqual(set(manifest), {"product", "version", "source_revision", "board", "images"})
         self.assertEqual([image["offset"] for image in manifest["images"]], [0x1000, 0x8000, 0x10000])
         self.assertEqual([image["role"] for image in manifest["images"]],
                          ["bootloader", "partition-table", "application"])
@@ -135,7 +134,7 @@ class PackagingTest(unittest.TestCase):
         self.rejected("source revision")
 
     def test_rejects_stale_compiled_board_identity(self):
-        (self.build / "pipkin.bin").write_bytes(application(board="esp32-2432s028r-provisional"))
+        (self.build / "pipkin.bin").write_bytes(application(board="esp32-other-board"))
         self.rejected("compiled board profile")
 
     def test_rejects_moving_nvs_or_enabling_encryption(self):
@@ -198,58 +197,18 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(stale.read_bytes(), b"old")
 
 
-class BoardCatalogTest(unittest.TestCase):
-    def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        (self.root / "boards").mkdir()
-        (self.root / "main").mkdir()
-        self.catalog = json.loads((SOURCE / "boards/profiles.json").read_text())
-        self.header = (SOURCE / "main/board.h").read_text()
+class BoardProfileTest(unittest.TestCase):
+    def test_reads_the_compiled_board_profile(self):
+        self.assertEqual(PACKAGER.board_profile(SOURCE), "esp32-2432s028r")
 
-    def profile(self):
-        (self.root / "boards/profiles.json").write_text(json.dumps(self.catalog))
-        (self.root / "main/board.h").write_text(self.header)
-        return PACKAGER.board_profile(self.root)
-
-    def test_current_catalog_matches_compiled_profile(self):
-        profile = self.profile()
-        self.assertEqual(profile["id"], "esp32-2432s028r")
-        self.assertIn("esp32-2432s028r-provisional", profile["aliases"])
-        self.assertEqual(profile["hardware"], "confirmed")
-
-    def test_rejects_identity_or_qualification_drift(self):
-        profile = self.catalog["profiles"][0]
-        profile["id"] = "unrelated-board"
-        with self.assertRaisesRegex(ValueError, "not in the catalog"):
-            self.profile()
-        profile["id"] = "esp32-2432s028r"
-        profile["hardware"] = "unconfirmed"
-        with self.assertRaisesRegex(ValueError, "qualification differs"):
-            self.profile()
-
-    def test_rejects_duplicate_aliases_and_unrecorded_qualification(self):
-        profile = self.catalog["profiles"][0]
-        profile["aliases"] = [profile["id"]]
-        with self.assertRaisesRegex(ValueError, "duplicate"):
-            self.profile()
-        profile["aliases"] = []
-        profile["hardware"] = "confirmed"
-        profile["variants"] = []
-        with self.assertRaisesRegex(ValueError, "recorded hardware evidence"):
-            self.profile()
-
-    def test_confirmation_requires_both_display_and_touch_evidence(self):
-        for variant in self.catalog["profiles"][0]["variants"]:
-            variant["qualification"]["touch"] = None
-        with self.assertRaisesRegex(ValueError, "recorded hardware evidence"):
-            self.profile()
-
-    def test_catalog_cannot_authorize_different_display_hardware(self):
-        self.catalog["profiles"][0]["display"]["controller"] = "ST7789"
-        with self.assertRaisesRegex(ValueError, "unsupported display or touch"):
-            self.profile()
+    def test_rejects_a_missing_or_ambiguous_profile(self):
+        with tempfile.TemporaryDirectory() as root:
+            header = Path(root) / "main/board.h"
+            header.parent.mkdir()
+            for text in ["", 'constexpr char kProfile[] = "a";\nconstexpr char kProfile[] = "b";\n']:
+                header.write_text(text)
+                with self.assertRaisesRegex(ValueError, "one kProfile"):
+                    PACKAGER.board_profile(root)
 
 
 if __name__ == "__main__":

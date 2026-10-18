@@ -14,13 +14,12 @@ board with a USB data cable, then run:
 pipkin flash
 ```
 
-CLI **1.4.0 or later** downloads the latest published stable firmware and the pinned
-Espressif flashing tool, checks the connected board and current firmware, and shows
-the plan before asking for yes/no confirmation. Enter means no. You do not need
-Python or ESP-IDF for this route. The same command updates an existing Pipkin;
-`pipkin update` updates the CLI itself. Firmware 1.4.0 and later need CLI 1.6.1 or
-later, which sends the task counts they show; an older CLI asks you to run
-`pipkin update` first.
+The CLI downloads the latest published stable firmware and the pinned Espressif
+flashing tool, checks the connected board and current firmware, and shows the plan
+before asking for yes/no confirmation. Enter means no. You do not need Python or
+ESP-IDF for this route. The same command updates an existing Pipkin; `pipkin update`
+updates the CLI itself. The firmware and CLI share a major version, which is the
+protocol version they speak, so CLI 2.x installs and talks to firmware 2.x.
 
 The target is an **ESP32 CYD 2.8-inch touch board with 4 MB flash** matching the
 [board profile](#board-profile). USB checks can identify the ESP chip and flash, but
@@ -29,9 +28,10 @@ needs your confirmation that it is the intended CYD. Installing Pipkin replaces 
 firmware and its saved application settings. Pipkin updates keep the selected display
 page, and an incompatible existing partition layout is rejected before writing.
 
-Firmware releases are created as drafts for maintainer review and qualification; the
-CLI uses only published stable releases. Firmware has a single application slot and no
-automatic rollback; rerun `pipkin flash` after an interrupted write. See the
+Firmware releases are created as drafts so they can be checked on hardware before
+publishing; the CLI uses only published stable releases. Firmware has a single
+application slot and no automatic rollback; rerun `pipkin flash` after an
+interrupted write. See the
 [CLI firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md)
 for selecting a port or version, reinstalling and USB recovery.
 
@@ -86,24 +86,16 @@ and creates a draft release.
 
 ## Board profile
 
-`main/board.h` holds the qualified `esp32-2432s028r` ("Cheap Yellow Display")
-profile: ILI9341-compatible LCD, XPT2046-compatible resistive touch, 320 × 240
-landscape, 4 MB flash. Pin assignments, touch calibration, display orientation,
-SPI speed and backlight
-polarity all live there. The [board catalog](../boards/profiles.json) records the
-two tested dual-USB variants, their physical markings, electronic observations and
-completed checks. Controller compatibility is inferred from working display and
-touch drivers; controller silicon was not read back. Check an unfamiliar board's
-wiring and components before flashing.
+`main/board.h` holds the `esp32-2432s028r` ("Cheap Yellow Display") profile:
+ILI9341-compatible LCD, XPT2046-compatible resistive touch, 320 × 240 landscape,
+4 MB flash. Pin assignments, touch calibration, display orientation, SPI speed and
+backlight polarity all live there. It has been tested on two dual-USB variants
+(USB-C and micro-USB), marked "ESP32-2432S028R" and "Bruce CYD 2432S028".
 
 Equivalent 2.8-inch touch CYD boards with ESP32-S or WROOM modules use this same
 profile when their wiring and screen hardware match [main/board.h](../main/board.h).
 Module branding or a printed model label alone does not require a separate firmware
-profile. The current drivers and pin assignments remain the compatibility boundary;
-other screen hardware or ESP32-S3 boards need their own implementation and qualification.
-
-See [Board profiles and identification](board-profiles.md) for the contributor
-report workflow, profile aliases and adding another physical variant.
+profile. Other screen hardware or ESP32-S3 boards need their own implementation.
 
 ## Display
 
@@ -159,17 +151,16 @@ For more detail, run `pipkin status` on the computer.
 
 The display listens on UART0 at 115200 baud, 8N1, for newline-delimited packets of at
 most 768 bytes. [The protocol reference](protocol.md) defines every field. Send
-`v=1 kind=identify` to receive the device's identity, firmware version, supported
-protocol range, sequence and clock state; this never resets or flashes the device.
+`v=2 kind=identify` to receive the device's firmware version, board, sequence and
+clock state; this never resets or flashes the device.
 
 Many CYD boards have an automatic reset circuit that restarts the ESP32 if DTR and RTS
 change independently when a port is opened. The Pipkin CLI keeps the port open to avoid
 repeated restarts, and resends everything if it detects one. This behaviour still
-needs qualification on production boards.
+needs testing on production boards.
 
 ## Remaining hardware work
 
 - Application rollback: the flash layout has a single application slot.
-- Additional qualification of touch accuracy, USB behavior across host platforms,
-  first-time flashing, firmware updates and host sleep signalling; the catalog
-  records which checks have been completed on each variant.
+- More testing of touch accuracy, USB behaviour across host platforms, first-time
+  flashing, firmware updates and host sleep signalling.

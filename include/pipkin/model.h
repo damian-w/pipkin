@@ -16,6 +16,10 @@ constexpr int kNavigationTop = 208;
 // Supported wall-clock range in Unix seconds.
 constexpr int64_t kMinUnix = 1577836800;
 constexpr int64_t kMaxUnix = 4102444800;
+// The protocol version is the major version shared with the CLI; every record carries it.
+#define PIPKIN_PROTOCOL "2"
+constexpr std::string_view kProtocolVersion = PIPKIN_PROTOCOL;
+constexpr std::string_view kIdentifyRequest = "v=" PIPKIN_PROTOCOL " kind=identify";
 constexpr std::size_t kMaxPacketBytes = 768;
 constexpr uint64_t kStaleAfterMs = 5 * 60 * 1000;
 constexpr uint64_t kHostLivenessMs = 60 * 1000;
@@ -33,7 +37,7 @@ constexpr uint64_t kDimAfterStaleMs = 5 * 60 * 1000;
 constexpr uint64_t kOffAfterStaleMs = 15 * 60 * 1000;
 constexpr uint64_t kTouchWakeMs = 60 * 1000;
 constexpr uint8_t kDimLevel = 20;
-// The helper rescans tasks every 30 seconds within a five-second budget.
+// The helper sends task counts on change and at least every 15 seconds.
 constexpr uint64_t kTaskFreshMs = 45 * 1000;
 constexpr uint16_t kMaxTaskCount = 999;
 

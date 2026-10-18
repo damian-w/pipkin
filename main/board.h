@@ -5,9 +5,8 @@
 
 namespace board {
 
-// Qualified driver layout; physical variants and observations live in boards/profiles.json.
+// ESP32-2432S028R ("Cheap Yellow Display") pins, panel and touch calibration.
 constexpr char kProfile[] = "esp32-2432s028r";
-constexpr char kHardware[] = "confirmed";
 constexpr int kLcdClock = 14;
 constexpr int kLcdMosi = 13;
 constexpr int kLcdMiso = 12;

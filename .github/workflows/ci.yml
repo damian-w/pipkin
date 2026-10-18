@@ -61,8 +61,8 @@ jobs:
           Prebuilt firmware for the ESP32-2432S028R "Cheap Yellow Display" (ESP32,
           4 MB flash, ILI9341-compatible LCD, XPT2046-compatible resistive touch).
 
-          Once published, Pipkin CLI 2.x installs it with `pipkin flash`. It can also
-          be built and flashed with ESP-IDF as described in docs/development.md.
+          Pipkin CLI 2.x installs it with `pipkin flash`. It can also be built and
+          flashed with ESP-IDF as described in docs/development.md.
 
           Keep LICENSE, NOTICE.md, Inter-OFL.txt and third-party-notices.txt with
           redistributed firmware. SHA256SUMS covers every supplied asset.

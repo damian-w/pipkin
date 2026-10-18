@@ -117,8 +117,9 @@ Small dots beside each provider name show its observed local tasks: blue for
 working, amber for needing attention and red for blocked, with counts once there
 are more than six. Overview has no clock, so its cards start at the top of the
 screen; the time remains on the status page and sleep screen. Task counts come
-from the helper about every 30 seconds and disappear after `kTaskFreshMs` (45
-seconds) without a fresh observation, or when the computer sleeps or disconnects.
+from the helper as they change, and at least every 15 seconds. They disappear
+after `kTaskFreshMs` (45 seconds) without a fresh observation, or when the
+computer sleeps or disconnects.
 
 Before Claude's first message, a confirmed idle session shows "Not started" and
 "Starts on first message" with a neutral gauge; weekly allowance stays visible.

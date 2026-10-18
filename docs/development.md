@@ -18,7 +18,9 @@ CLI **1.4.0 or later** downloads the latest published stable firmware and the pi
 Espressif flashing tool, checks the connected board and current firmware, and shows
 the plan before asking for yes/no confirmation. Enter means no. You do not need
 Python or ESP-IDF for this route. The same command updates an existing Pipkin;
-`pipkin update` updates the CLI itself.
+`pipkin update` updates the CLI itself. Firmware 1.4.0 and later need CLI 1.6.1 or
+later, which sends the task counts they show; an older CLI asks you to run
+`pipkin update` first.
 
 The target is an **ESP32 CYD 2.8-inch touch board with 4 MB flash** matching the
 [board profile](#board-profile). USB checks can identify the ESP chip and flash, but
@@ -111,6 +113,13 @@ re-evaluated once a second; unchanged frames send nothing. Page changes grow the
 gauges from empty over 650 ms, and a changed reading eases from the value on screen
 over the same time. The selected page is saved to flash only when it changes.
 
+Small dots beside each provider name show its observed local tasks: blue for
+working, amber for needing attention and red for blocked, with counts once there
+are more than six. Overview has no clock, so its cards start at the top of the
+screen; the time remains on the status page and sleep screen. Task counts come
+from the helper about every 30 seconds and disappear after `kTaskFreshMs` (45
+seconds) without a fresh observation, or when the computer sleeps or disconnects.
+
 Before Claude's first message, a confirmed idle session shows "Not started" and
 "Starts on first message" with a neutral gauge; weekly allowance stays visible.
 The CLI confirms this only for zero utilization and an explicit null reset.
@@ -149,8 +158,8 @@ For more detail, run `pipkin status` on the computer.
 
 The display listens on UART0 at 115200 baud, 8N1, for newline-delimited packets of at
 most 768 bytes. [The protocol reference](protocol.md) defines every field. Send
-`v=1 kind=identify` to receive the device's identity, firmware version, sequence and
-clock state; this never resets or flashes the device.
+`v=1 kind=identify` to receive the device's identity, firmware version, supported
+protocol range, sequence and clock state; this never resets or flashes the device.
 
 Many CYD boards have an automatic reset circuit that restarts the ESP32 if DTR and RTS
 change independently when a port is opened. The Pipkin CLI keeps the port open to avoid

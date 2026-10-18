@@ -11,8 +11,7 @@ namespace pipkin {
 constexpr int kDisplayWidth = 320;
 constexpr int kDisplayHeight = 240;
 // Touch regions follow the rendered layout.
-constexpr int kHeaderBottom = 32;
-constexpr int kOverviewSplit = 123;
+constexpr int kOverviewSplit = 110;
 constexpr int kNavigationTop = 208;
 // Supported wall-clock range in Unix seconds.
 constexpr int64_t kMinUnix = 1577836800;
@@ -34,6 +33,9 @@ constexpr uint64_t kDimAfterStaleMs = 5 * 60 * 1000;
 constexpr uint64_t kOffAfterStaleMs = 15 * 60 * 1000;
 constexpr uint64_t kTouchWakeMs = 60 * 1000;
 constexpr uint8_t kDimLevel = 20;
+// The helper rescans tasks every 30 seconds within a five-second budget.
+constexpr uint64_t kTaskFreshMs = 45 * 1000;
+constexpr uint16_t kMaxTaskCount = 999;
 
 enum class Provider : uint8_t { Codex, Claude };
 enum class Page : uint8_t { Overview, Codex, Claude, About };
@@ -41,6 +43,7 @@ enum class AllowanceState : uint8_t { Unknown, Metered, NoCap, NotStarted, Unsup
 enum class AppState : uint8_t { Unknown, Available, Unavailable, Unsupported };
 enum class HostState : uint8_t { Unknown, Awake, Asleep, Disconnected };
 enum class Overlay : uint8_t { None, Sleep };
+enum class TaskCoverage : uint8_t { Unknown, Partial, Unavailable, Unsupported };
 
 struct Freshness {
     std::optional<int64_t> observed_unix;
@@ -75,6 +78,16 @@ struct ProviderData {
     Window weekly;
     std::optional<uint32_t> banked_resets;
     Freshness banked_freshness;
+};
+
+// Observed local GUI tasks; counts are partial, and idle or unknown tasks are not sent.
+// Kept apart from ProviderData so allowance updates and sign-out never touch them.
+struct Tasks {
+    TaskCoverage coverage = TaskCoverage::Unknown;
+    uint16_t working = 0;
+    uint16_t attention = 0;
+    uint16_t blocked = 0;
+    Freshness freshness;
 };
 
 struct Clock {
@@ -112,6 +125,7 @@ struct Boot {
 
 struct State {
     std::array<ProviderData, 2> providers{};
+    std::array<Tasks, 2> tasks{};
     Boot boot;
     Clock clock;
     HostState host = HostState::Unknown;
@@ -146,6 +160,9 @@ bool usable(const Window& window);
 // Restarts the page reveal.
 void view_changed(State& state, uint64_t now_ms);
 bool ingest(State& state, std::string_view line, uint64_t now_ms);
+// Partial counts observed recently by the synchronized clock; anything else shows no tasks.
+bool tasks_current(const Tasks& tasks, uint64_t now_ms);
+// Tasks alone never make a provider visible.
 bool provider_visible(const State& state, Provider provider);
 VisiblePages visible_pages(const State& state);
 bool page_visible(const State& state, Page page);

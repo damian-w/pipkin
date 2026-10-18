@@ -220,7 +220,7 @@ def package(build_dir, output_dir, source_dir, revision, tag=None):
         "source_revision": revision, "board": profile["id"],
         "hardware": profile["hardware"], "chip": profile["chip"], "flash_size": profile["flash_size"],
         "flash_mode": settings["flash_mode"], "flash_freq": settings["flash_freq"],
-        "protocol_min": 1, "protocol_max": 1, "minimum_cli": "1.4.0",
+        "protocol_min": 1, "protocol_max": 2, "minimum_cli": "1.6.1",
         "layout": profile["layout"], "images": images,
     }
     payloads["firmware.json"] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")

@@ -4,6 +4,7 @@
 #include <charconv>
 #include <initializer_list>
 #include <limits>
+#include <utility>
 
 namespace pipkin {
 namespace {
@@ -123,6 +124,15 @@ bool freshness(Freshness& result, const Freshness& previous, std::optional<int64
     return true;
 }
 
+// Observations must belong to the current clock epoch; the initial epoch can be omitted.
+bool current_epoch(const Packet& packet, const State& state) {
+    uint64_t epoch = 0;
+    return (!packet.get("clock_epoch") ||
+            number<uint64_t>(packet.get("clock_epoch"), 0, std::numeric_limits<uint64_t>::max(),
+                             epoch)) &&
+           epoch == state.clock.observation_epoch;
+}
+
 bool window(const Packet& packet, bool session, Window& result, const Window& previous,
             std::optional<int64_t> observed, const State& state, uint64_t now_ms) {
     const auto status = packet.get(session ? "session" : "weekly");
@@ -208,13 +218,7 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
     std::array<char, 33> account_id{};
     std::copy(account->begin(), account->end(), account_id.begin());
     const bool same_account = data.account == account_id;
-    if (mode == "patch" && !same_account)
-        return false;
-    uint64_t observation_epoch = 0;
-    if ((packet.get("clock_epoch") &&
-         !number<uint64_t>(packet.get("clock_epoch"), 0, std::numeric_limits<uint64_t>::max(),
-                           observation_epoch)) ||
-        observation_epoch != state.clock.observation_epoch)
+    if ((mode == "patch" && !same_account) || !current_epoch(packet, state))
         return false;
     std::optional<int64_t> observed;
     if (packet.get("observed") != "null") {
@@ -258,10 +262,51 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
     return true;
 }
 
+// Each record replaces the provider's observed counts; only partial coverage carries counts.
+bool tasks(const Packet& packet, State& state, uint64_t now_ms) {
+    if (!packet.only({"v", "kind", "seq", "provider", "coverage", "observed", "clock_epoch",
+                      "working", "attention", "blocked"}))
+        return false;
+    std::size_t index = 0;
+    int64_t observed = 0;
+    if (!provider(packet, index) || !current_epoch(packet, state) ||
+        !number<int64_t>(packet.get("observed"), kMinUnix, kMaxUnix, observed))
+        return false;
+    if (const auto now = unix_now(state, now_ms); now && observed > *now + 30)
+        return false;
+    Tasks result;
+    const auto coverage = packet.get("coverage");
+    if (coverage == "partial")
+        result.coverage = TaskCoverage::Partial;
+    else if (coverage == "unavailable")
+        result.coverage = TaskCoverage::Unavailable;
+    else if (coverage == "unsupported")
+        result.coverage = TaskCoverage::Unsupported;
+    else
+        return false;
+    const std::pair<std::string_view, uint16_t*> counts[] = {{"working", &result.working},
+                                                             {"attention", &result.attention},
+                                                             {"blocked", &result.blocked}};
+    for (const auto& [key, count] : counts) {
+        const auto value = packet.get(key);
+        if (result.coverage == TaskCoverage::Partial
+                ? !number<uint16_t>(value, 0, kMaxTaskCount, *count)
+                : value.has_value())
+            return false;
+    }
+    auto& stored = state.tasks[index];
+    if (!freshness(result.freshness, stored.freshness, observed, state, now_ms))
+        return false;
+    stored = result;
+    return true;
+}
+
 bool apply(const Packet& packet, State& state, uint64_t now_ms) {
     const auto kind = packet.get("kind");
     if (kind == "usage")
         return usage(packet, state, now_ms);
+    if (kind == "tasks")
+        return tasks(packet, state, now_ms);
     if (kind == "clock") {
         if (!packet.only({"v", "kind", "seq", "unix", "tz", "rebase"}))
             return false;
@@ -281,6 +326,9 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
                                         observation_epoch))
             return false;
         state.clock = {epoch, now_ms, offset, observation_epoch};
+        // A rebase follows a wake or clock jump; earlier task lists no longer apply.
+        if (rebase)
+            state.tasks = {};
         return true;
     }
     if (kind == "host") {
@@ -302,6 +350,9 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
         else
             return false;
         state.host_received_ms = now_ms;
+        // Never carry working or attention dots across host sleep or helper exit.
+        if (state.host != HostState::Awake)
+            state.tasks = {};
         if (state.host == HostState::Asleep && state.overlay == Overlay::None)
             state.overlay = Overlay::Sleep;
         else if (state.host != HostState::Asleep && state.overlay == Overlay::Sleep)
@@ -338,7 +389,9 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
 bool ingest(State& state, std::string_view line, uint64_t now_ms) {
     Packet packet;
     uint64_t sequence = 0;
-    if (!tokenize(line, packet) || packet.get("v") != "1" || now_ms < state.last_received_ms)
+    // Task records arrived in protocol 2; every other kind keeps its protocol 1 version.
+    if (!tokenize(line, packet) || packet.get("v") != (packet.get("kind") == "tasks" ? "2" : "1") ||
+        now_ms < state.last_received_ms)
         return false;
     // Sequence is optional so stateless senders need no identify round trip; usage ordering is
     // enforced independently by per-group observation watermarks.

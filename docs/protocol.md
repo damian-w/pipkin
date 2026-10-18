@@ -1,8 +1,9 @@
-# Display protocol, version 1
+# Display protocol, version 2
 
-Pipkin receives allowance, clock and host status over serial at 115200 baud,
-8N1. The CLI reads the providers and sends these records. Credentials, prompts, token totals and monetary
-balances stay off the wire; the protocol has no reset-redemption commands.
+Pipkin receives allowance, clock, host status and local task counts over serial at
+115200 baud, 8N1. The CLI reads the providers and sends these records. Credentials,
+prompts, task content, token totals and monetary balances stay off the wire; the
+protocol has no reset-redemption commands.
 
 Each record contains ASCII `key=value` pairs separated by one space, terminated
 by LF or CRLF. State-changing keys may appear in any order; the identity request
@@ -13,7 +14,8 @@ atomically. Stream receivers must discard an oversized record through its line
 ending; they must not parse its tail as a new record. Integers are decimal,
 without a leading plus sign, fractional part, or exponent.
 
-Every state-changing record requires `v=1` and `kind`. A positive unsigned 64-bit
+Every state-changing record requires `kind` and the protocol version that defined
+it: `v=2` for task records and `v=1` for every other kind. A positive unsigned 64-bit
 `seq` is optional. When present, sequence numbers must increase across all
 providers and message kinds for the current device boot; duplicates and lower
 sequence numbers are rejected. Records without `seq` do not change the stored
@@ -38,9 +40,12 @@ v=1 kind=identify
 ```
 
 Its response includes `v=1 kind=identity product=pipkin`, firmware version,
-compiled firmware board profile, the last accepted `seq`, current `clock_epoch`,
-and the device's current `unix` time, or `null` before clock synchronization. A lower `seq` than
-a sender last used indicates the device restarted and lost volatile state.
+compiled firmware board profile, the supported `protocol_min` and `protocol_max`,
+the last accepted `seq`, current `clock_epoch`, and the device's current `unix`
+time, or `null` before clock synchronization. Current firmware reports
+`protocol_min=1 protocol_max=2`; firmware reporting `protocol_max=1` predates task
+records. A lower `seq` than a sender last used indicates the device restarted and
+lost volatile state.
 Identity replies do not authorize flashing; this protocol has no firmware-update
 or rollback commands.
 
@@ -211,6 +216,37 @@ allowed with it:
 v=1 kind=usage seq=7 provider=codex mode=full account=null
 ```
 
+## Local tasks
+
+Protocol 2 adds one record kind. Send it only when the identity reply reports
+`protocol_max` of 2 or more; earlier firmware rejects it.
+
+```text
+v=2 kind=tasks seq=8 provider=codex coverage=partial observed=1800000000 working=2 attention=1 blocked=0
+v=2 kind=tasks seq=9 provider=claude coverage=unavailable observed=1800000000
+```
+
+Each record replaces that provider's task counts. `coverage` is `partial`,
+`unavailable` or `unsupported`, as reported by the computer's local task
+collection; no source establishes complete coverage. Only `partial` carries
+`working`, `attention` and `blocked`, each an observed count from 0 through 999,
+and all three are required; other coverage values must omit them. Idle and
+unknown tasks, task identities, titles and source update times stay on the
+computer.
+
+`observed` is when the computer finished collecting, with the same bounds and
+30-second future limit as usage; it cannot be `null`. Records must carry the
+current `clock_epoch` and must not regress the provider's previous task
+observation. The sender should send a record for each provider after every
+collection, about every 30 seconds, and immediately on resync. The display shows
+counts only while their observation is under 45 seconds old by its synchronized
+clock, so counts from a stopped collector disappear rather than becoming zero.
+Host `asleep` and `disconnected` reports and a clock rebase clear all task counts.
+
+Task records are not host reports. They do not change allowance, app state or
+account, and do not make a provider page visible. Missing counts never mean zero
+tasks.
+
 ## Display behaviour
 
 Pages are Overview (0), Codex (1), Claude Code (2) and status/About (3). A provider
@@ -221,7 +257,13 @@ not make a provider visible.
 
 Overview is always available. Swipe left/right or tap the right/left half of the
 bottom strip to cycle through visible pages, wrapping at either end. Overview
-provider cards open their detail pages. Losing a provider's readings returns its
+provider cards, which start at the top of the screen, open their detail pages.
+
+Current task counts appear as 6-pixel dots right-aligned on the provider name row
+of Overview and each provider page: one per observed task, working (blue), then
+needing attention (amber), then blocked (red). Above six tasks, each status shows
+one dot and its count. The wall-clock time appears on status/About and the sleep
+overlay. Losing a provider's readings returns its
 page to Overview. A saved page preference may wait for initial data.
 
 Horizontal swipes need 60 pixels of movement, at least twice the vertical

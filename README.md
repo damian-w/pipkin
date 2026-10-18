@@ -21,7 +21,9 @@ halfway through something.
 - **Overview:** Claude and Codex side by side, with your current session and your
   week.
 - **A page for each:** big, easy-to-read dials with a countdown to the next reset.
-- **The time**, up in the corner.
+- **Your tasks:** small dots beside each app show Claude Code and Codex tasks that are
+  working (blue), waiting for you (amber) or blocked (red), read from the desktop apps
+  on your Mac or Windows computer.
 
 The numbers show what you have **left**. A gauge turns amber when you're running low
 and red once it's used up. If a reading is out of date, or an app hasn't checked in,

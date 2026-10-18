@@ -89,15 +89,60 @@ int main() {
     assert(frame(state, 1000) != unlabelled);
     provider.session.duration_seconds.reset();
 
+    // Changed pixels inside and outside the rectangle from (left, top) to the right edge.
+    auto changes = [](const std::vector<uint16_t>& a, const std::vector<uint16_t>& b, int top,
+                      int bottom, int left) {
+        std::array<int, 2> changed{};
+        for (int y = 0; y < pipkin::kDisplayHeight; ++y)
+            for (int x = 0; x < pipkin::kDisplayWidth; ++x) {
+                const auto i = y * pipkin::kDisplayWidth + x;
+                if (a[i] != b[i])
+                    ++changed[y >= top && y < bottom && x >= left ? 0 : 1];
+            }
+        return changed;
+    };
+    // The clock shows only on About and the sleep overlay.
     state.view_revision = 0;
     assert(frame(state, 0) == frame(state, 1000));
-    const auto next_minute = frame(state, 60000);
-    for (int y = 40; y < pipkin::kDisplayHeight; ++y)
-        for (int x = 0; x < pipkin::kDisplayWidth; ++x) {
-            const auto i = y * pipkin::kDisplayWidth + x;
-            assert(next_minute[i] == full[i]);
-        }
-    assert(next_minute != full);
+    assert(frame(state, 60000) == full);
+    state.page = pipkin::Page::Overview;
+    const auto overview = frame(state, 1000);
+    assert(frame(state, 60000) == overview);
+    state.about_open = true;
+    assert(changes(frame(state, 1000), frame(state, 60000), 0, 30, 250)[0] > 0);
+    state.about_open = false;
+
+    // Task dots take the clock's corner on provider pages and join the overview heading.
+    auto& tasks = state.tasks[0];
+    tasks.coverage = pipkin::TaskCoverage::Partial;
+    tasks.freshness.observed_unix = 1800000000;
+    tasks.freshness.age_on_receipt_ms = 0;
+    assert(frame(state, 1000) == overview);
+    tasks.working = 2;
+    tasks.attention = 1;
+    const auto overview_dots = changes(overview, frame(state, 1000), 56, 72, 250);
+    assert(overview_dots[0] > 0 && overview_dots[1] == 0);
+    state.page = pipkin::Page::Codex;
+    const auto dots = frame(state, 1000);
+    const auto corner = changes(full, dots, 0, 30, 250);
+    assert(corner[0] > 0 && corner[1] == 0);
+    assert(frame(state, pipkin::kTaskFreshMs - 1) == dots);
+    assert(frame(state, pipkin::kTaskFreshMs) == full);
+    tasks.blocked = 1;
+    assert(frame(state, 1000) != dots);
+    tasks.working = 8;
+    const auto counted = frame(state, 1000);
+    const auto counted_corner = changes(full, counted, 0, 30, 250);
+    assert(counted != dots && counted_corner[0] > 0 && counted_corner[1] == 0);
+    tasks.coverage = pipkin::TaskCoverage::Unavailable;
+    assert(frame(state, 1000) == full);
+    tasks.coverage = pipkin::TaskCoverage::Partial;
+    tasks.freshness.age_on_receipt_ms.reset();
+    assert(frame(state, 1000) == full);
+    tasks.freshness.age_on_receipt_ms = 0;
+    tasks.working = 2;
+    state.tasks[1] = tasks;
+    state.tasks[1].working = 7;
 
     auto banded = [&](const pipkin::State& reading, uint64_t now, int rows) {
         std::vector<uint16_t> pixels(count);
@@ -113,6 +158,7 @@ int main() {
         for (int rows : {1, 7, 16, 240})
             assert(banded(state, 1000, rows) == frame(state, 1000));
     }
+    state.tasks = {};
     state.providers[1] = {};
     state.page = pipkin::Page::Codex;
     pipkin::render(state, 0, guarded.data() + 1, 200, 41);
@@ -222,6 +268,6 @@ int main() {
     assert(frame(state, 18500 + pipkin::kBootFinishMs) == blank);
     state.overlay = pipkin::Overlay::Sleep;
     assert(!pipkin::animation_active(state, 1000) && frame(state, 1000) == frame(state, 2000));
-    std::puts("Render bounds, remaining, reset visibility, reveal, clock, About and boot checks "
-              "passed");
+    std::puts("Render bounds, remaining, reset visibility, reveal, clock, task dot, About and boot "
+              "checks passed");
 }

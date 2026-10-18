@@ -15,8 +15,11 @@ constexpr int64_t epoch = 1800000000;
 struct Feed {
     State state;
     uint64_t sequence = 0;
-    bool send(const std::string& fields, uint64_t now = 0) {
-        return ingest(state, "v=1 seq=" + std::to_string(++sequence) + " " + fields, now);
+    bool send(const std::string& fields, uint64_t now = 0, int version = 1) {
+        return ingest(state,
+                      "v=" + std::to_string(version) + " seq=" + std::to_string(++sequence) + " " +
+                          fields,
+                      now);
     }
     void clock() { assert(send("kind=clock unix=1800000000 tz=480")); }
 };
@@ -244,8 +247,6 @@ void navigation_and_overlays() {
     assert(selected_page(feed.state) == Page::Overview);
     assert(feed.state.page == Page::Claude);
     assert(feed.state.view_revision == 0);
-    tap(feed.state, 20, 20, 1500);
-    assert(selected_page(feed.state) == Page::Overview && feed.state.view_revision == 0);
 
     assert(feed.send("kind=usage provider=claude mode=full account=sample-c observed=1800000002 "
                      "session=metered session_id=period-c session_used=1000", 2000));
@@ -299,6 +300,28 @@ void navigation_and_overlays() {
     assert(feed.send("kind=usage provider=codex mode=full account=null", 6000));
     assert(selected_page(feed.state) == Page::Overview && feed.state.page == Page::Overview);
     assert(feed.state.page_entered_ms == 6000 && visible_pages(feed.state).count == 1);
+}
+
+// Overview has no header, so the first card's tap region starts at the top edge.
+void overview_cards() {
+    Feed feed;
+    feed.clock();
+    assert(feed.send(snapshot));
+    tap(feed.state, 160, 0, 100);
+    assert(selected_page(feed.state) == Page::Codex);
+    tap(feed.state, 20, 220, 200);
+    assert(selected_page(feed.state) == Page::Overview);
+    tap(feed.state, 160, kNavigationTop - 1, 300);
+    assert(selected_page(feed.state) == Page::Codex);
+    tap(feed.state, 20, 220, 400);
+    assert(feed.send("kind=usage provider=claude mode=full account=sample-c observed=1800000000 "
+                     "session=metered session_id=period-c session_used=100"));
+    tap(feed.state, 160, kOverviewSplit - 1, 500);
+    assert(selected_page(feed.state) == Page::Codex);
+    tap(feed.state, 20, 220, 600);
+    assert(selected_page(feed.state) == Page::Overview);
+    tap(feed.state, 160, kOverviewSplit, 700);
+    assert(selected_page(feed.state) == Page::Claude);
 }
 
 void conditional_provider_visibility() {
@@ -747,6 +770,86 @@ void host_power_backlight() {
     assert(noisy.state.host == HostState::Awake);
 }
 
+// Task records arrived in protocol 2 and stay apart from allowance, liveness and visibility.
+void task_counts() {
+    Feed feed;
+    feed.clock();
+    const std::string codex = "kind=tasks provider=codex coverage=partial observed=1800000000 ";
+    const std::string counts = codex + "working=2 attention=1 blocked=0";
+    const auto& tasks = feed.state.tasks[0];
+    assert(!feed.send(counts));
+    assert(!feed.send("kind=host state=awake", 0, 2));
+    assert(feed.send(counts, 0, 2));
+    assert(tasks.coverage == TaskCoverage::Partial && tasks.working == 2 &&
+           tasks.attention == 1 && tasks.blocked == 0);
+    assert(tasks_current(tasks, kTaskFreshMs - 1) && !tasks_current(tasks, kTaskFreshMs));
+    assert(!provider_visible(feed.state, Provider::Codex) && !feed.state.host_received_ms);
+    assert(feed.state.tasks[1].coverage == TaskCoverage::Unknown);
+
+    const auto good_sequence = feed.state.last_sequence;
+    const std::string unavailable = "kind=tasks provider=codex coverage=unavailable observed=";
+    for (const std::string& fields :
+         {codex + "working=2 attention=1",
+          codex + "working=1000 attention=0 blocked=0",
+          codex + "working=-1 attention=0 blocked=0",
+          codex + "working=1 attention=0 blocked=0 idle=3",
+          codex + "working=1 attention=0 blocked=0 clock_epoch=5",
+          unavailable + "1800000000 working=0",
+          unavailable + "null",
+          unavailable + "1800000031",
+          unavailable + "1799999999",
+          std::string("kind=tasks provider=codex coverage=unavailable"),
+          std::string("kind=tasks provider=other coverage=unavailable observed=1800000000"),
+          std::string("kind=tasks provider=codex coverage=complete observed=1800000000 "
+                      "working=1 attention=0 blocked=0")}) {
+        assert(!feed.send(fields, 0, 2));
+        assert(feed.state.last_sequence == good_sequence && tasks.working == 2);
+    }
+
+    // Age follows the source observation, not packet receipt.
+    assert(feed.send(codex + "working=0 attention=0 blocked=1", 1000, 2));
+    assert(tasks.blocked == 1 && tasks.working == 0);
+    assert(tasks_current(tasks, kTaskFreshMs - 1) && !tasks_current(tasks, kTaskFreshMs));
+
+    // Allowance sign-out leaves tasks alone; only partial coverage is current.
+    assert(feed.send("kind=app provider=codex state=signed_out", 2000));
+    assert(tasks_current(tasks, 2000));
+    assert(feed.send(unavailable + "1800000002", 2000, 2));
+    assert(tasks.coverage == TaskCoverage::Unavailable && !tasks_current(tasks, 2000));
+    assert(feed.send("kind=tasks provider=claude coverage=unsupported observed=1800000002", 2000,
+                     2));
+    assert(feed.state.tasks[1].coverage == TaskCoverage::Unsupported);
+
+    // Sleep, disconnect and clock rebases clear counts; awake heartbeats do not.
+    const auto observed = [](int second) {
+        return "kind=tasks provider=codex coverage=partial observed=" +
+               std::to_string(1800000000 + second) + " working=1 attention=0 blocked=0";
+    };
+    assert(feed.send(observed(3), 3000, 2));
+    assert(feed.send("kind=host state=awake", 3000));
+    assert(tasks_current(tasks, 3000));
+    assert(feed.send("kind=host state=asleep", 3000));
+    assert(tasks.coverage == TaskCoverage::Unknown);
+    assert(feed.send("kind=host state=awake", 4000));
+    assert(feed.send(observed(4), 4000, 2));
+    assert(feed.send("kind=host state=disconnected", 4000));
+    assert(tasks.coverage == TaskCoverage::Unknown);
+    assert(feed.state.tasks[1].coverage == TaskCoverage::Unknown);
+    assert(feed.send(observed(5), 5000, 2));
+    assert(feed.send("kind=clock unix=1800000005 tz=480 rebase=1", 5000));
+    assert(tasks.coverage == TaskCoverage::Unknown);
+    assert(!feed.send(observed(5), 5000, 2));
+    const auto epoch = std::to_string(feed.state.clock.observation_epoch);
+    assert(feed.send(observed(5) + " clock_epoch=" + epoch, 5000, 2));
+    assert(tasks_current(tasks, 5000));
+
+    // Without a synchronized clock the age is unknown, so nothing is current.
+    Feed unsynced;
+    assert(unsynced.send(counts, 0, 2));
+    assert(unsynced.state.tasks[0].coverage == TaskCoverage::Partial);
+    assert(!tasks_current(unsynced.state.tasks[0], 0));
+}
+
 void unsequenced_senders() {
     State state;
     assert(ingest(state, "v=1 kind=clock unix=1800000000 tz=0", 0));
@@ -773,8 +876,17 @@ void helper_fixture() {
     uint64_t now = 0;
     int count = 0;
     bool saw_not_started = false;
+    int task_records = 0;
     while (std::getline(fixture, line)) {
         assert(ingest(state, line, now += 100));
+        if (line.find("kind=tasks provider=codex coverage=partial") != std::string::npos) {
+            const auto& codex = state.tasks[0];
+            assert(tasks_current(codex, now) && codex.working + codex.attention + codex.blocked);
+            ++task_records;
+        }
+        if (line.find("rebase=1") != std::string::npos ||
+            line.find("state=asleep") != std::string::npos)
+            assert(!tasks_current(state.tasks[0], now) && !tasks_current(state.tasks[1], now));
         if (line.find("kind=host state=asleep") != std::string::npos)
             assert(state.overlay == Overlay::Sleep && backlight_level(state, now) == 0);
         if (line.find("kind=host state=awake") != std::string::npos)
@@ -789,12 +901,13 @@ void helper_fixture() {
         }
         ++count;
     }
-    assert(count == 19 && saw_not_started);
+    assert(count == 23 && saw_not_started && task_records == 2);
     assert(state.providers[0].weekly.used_tenths == 1000 && state.providers[0].banked_resets == 0);
     assert(state.providers[1].session.state == AllowanceState::Metered);
-    assert(state.providers[1].session.used_tenths == 10 && state.clock.observation_epoch == 7);
+    assert(state.providers[1].session.used_tenths == 10 && state.clock.observation_epoch == 9);
     assert(state.providers[1].session.reset_unix == 1800018000);
     assert(state.host == HostState::Disconnected);
+    assert(state.tasks[0].coverage == TaskCoverage::Unknown);
 }
 
 } // namespace
@@ -806,6 +919,7 @@ int main() {
     clock_freshness_and_liveness();
     unknown_observation_age();
     navigation_and_overlays();
+    overview_cards();
     conditional_provider_visibility();
     session_not_started();
     gestures_and_about();
@@ -819,6 +933,7 @@ int main() {
     backlight();
     host_power_backlight();
     unsequenced_senders();
+    task_counts();
     helper_fixture();
     std::cout << "Core protocol, state, clock and navigation checks passed.\n";
 }

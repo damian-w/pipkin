@@ -103,7 +103,7 @@ class PackagingTest(unittest.TestCase):
         self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["board"], "esp32-2432s028r")
         self.assertEqual(manifest["hardware"], "confirmed")
-        self.assertEqual(manifest["minimum_cli"], "1.4.0")
+        self.assertEqual(manifest["minimum_cli"], "1.6.1")
         self.assertEqual([image["offset"] for image in manifest["images"]], [0x1000, 0x8000, 0x10000])
         self.assertEqual([image["role"] for image in manifest["images"]],
                          ["bootloader", "partition-table", "application"])

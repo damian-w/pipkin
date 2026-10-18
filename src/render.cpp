@@ -25,6 +25,9 @@ constexpr auto claude_tile = rgb(201, 112, 78);
 constexpr auto pip_body = rgb(238, 138, 92);
 constexpr auto pip_hand = rgb(224, 122, 77);
 constexpr auto sparkle = rgb(245, 197, 66);
+constexpr auto task_working = rgb(110, 170, 250);
+constexpr auto task_attention = rgb(245, 190, 70);
+constexpr auto task_blocked = rgb(240, 96, 96);
 constexpr float pi = 3.14159265f;
 
 bool revealing(const State& state, uint64_t now) {
@@ -467,11 +470,50 @@ void bar(Canvas& c, int x, int y, int width, const Window& w, uint64_t now, doub
         c.round_rect(x, y, std::max(filled, 4), 4, 2, tone(w));
 }
 
-void provider_heading(Canvas& c, const ProviderData& p, int index, int y, uint64_t now) {
+constexpr int kTaskDot = 6;
+constexpr int kTaskGap = 3;
+constexpr int kTaskCountGap = 6;
+constexpr int kTaskDotLimit = 6;
+
+// One dot per observed working, attention or blocked task, drawn leftward from right in that
+// order; past kTaskDotLimit each status shows one dot and its count. Returns the width used.
+int task_dots(Canvas& c, const State& state, int index, int right, int middle, uint64_t now) {
+    const auto& tasks = state.tasks[index];
+    if (!tasks_current(tasks, now))
+        return 0;
+    const struct {
+        uint16_t count;
+        uint16_t color;
+    } statuses[] = {{tasks.blocked, task_blocked},
+                    {tasks.attention, task_attention},
+                    {tasks.working, task_working}};
+    const bool counted = tasks.working + tasks.attention + tasks.blocked > kTaskDotLimit;
+    int x = right;
+    for (const auto& status : statuses)
+        for (int i = 0; i < (counted ? std::min<int>(status.count, 1) : status.count); ++i) {
+            if (x < right)
+                x -= counted ? kTaskCountGap : kTaskGap;
+            if (counted) {
+                char count[8];
+                std::snprintf(count, sizeof(count), "%u", static_cast<unsigned>(status.count));
+                x -= c.width(count, font::size11);
+                c.text(x, middle - 7, count, font::size11, secondary);
+                x -= 2;
+            }
+            x -= kTaskDot;
+            c.round_rect(x, middle - kTaskDot / 2, kTaskDot, kTaskDot, kTaskDot / 2.0f,
+                         status.color);
+        }
+    return right - x;
+}
+
+void provider_heading(Canvas& c, const State& state, int index, int y, uint64_t now) {
+    const auto& p = state.providers[index];
     provider_title(c, index, y);
     banked(c, p, index, y + 8, now);
+    const int dots = task_dots(c, state, index, 304, y + 8, now);
     if (const char* status = freshness(p, now))
-        c.right(304, y + 2, status, font::size11, caution);
+        c.right(dots ? 294 - dots : 304, y + 2, status, font::size11, caution);
 }
 
 void overview_window(Canvas& c, const State& state, int x, int y, int width, const Window& w,
@@ -507,7 +549,7 @@ void overview_window(Canvas& c, const State& state, int x, int y, int width, con
 void provider_row(Canvas& c, const State& state, int index, int y, bool expanded, uint64_t now,
                   double progress) {
     const auto& p = state.providers[index];
-    provider_heading(c, p, index, y, now);
+    provider_heading(c, state, index, y, now);
     if (session_visible(p)) {
         overview_window(c, state, 16, y + 25, 136, p.session, false, expanded, now, progress);
         overview_window(c, state, 168, y + 25, 136, p.weekly, true, expanded, now, progress);
@@ -548,6 +590,7 @@ void detail(Canvas& c, const State& state, uint64_t now, double progress) {
     const auto& p = state.providers[index];
     provider_title(c, index, 8);
     banked(c, p, index, 16, now);
+    task_dots(c, state, index, 304, 16, now);
     const char* footer = connection(state);
     if (!footer)
         footer = freshness(p, now);
@@ -894,17 +937,17 @@ void render(const State& state, uint64_t now_ms, uint16_t* pixels, int first_row
                    font::size14, foreground);
         c.centered(160, 124, setup_hint(state), font::size11, secondary);
     } else if (overview) {
+        // Overview has no header; its cards use the full height above the page dots.
         if (codex && claude) {
-            provider_row(c, state, 0, 38, false, now_ms, progress);
+            provider_row(c, state, 0, 20, false, now_ms, progress);
             c.rect(16, kOverviewSplit, 288, 1, hairline);
-            provider_row(c, state, 1, 134, false, now_ms, progress);
+            provider_row(c, state, 1, 126, false, now_ms, progress);
         } else
-            provider_row(c, state, codex ? 0 : 1, 66, true, now_ms, progress);
+            provider_row(c, state, codex ? 0 : 1, 56, true, now_ms, progress);
         if (auto status = connection(state))
-            c.right(304, 10, status, font::size11, caution);
+            c.right(304, 221, status, font::size11, caution);
     } else
         detail(c, state, now_ms, progress);
-    clock_text(c, state, now_ms, overview || (!codex && !claude));
     if (codex || claude)
         page_indicator(c, state);
 }

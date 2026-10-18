@@ -69,6 +69,11 @@ bool host_alive(const State& state, uint64_t now_ms) {
            now_ms >= *state.host_received_ms && now_ms - *state.host_received_ms < kHostLivenessMs;
 }
 
+bool tasks_current(const Tasks& tasks, uint64_t now_ms) {
+    const auto age = tasks.freshness.observation_age_ms(now_ms);
+    return tasks.coverage == TaskCoverage::Partial && age && *age < kTaskFreshMs;
+}
+
 bool provider_visible(const State& state, Provider provider) {
     const auto index = static_cast<std::size_t>(provider);
     if (index >= state.providers.size())
@@ -161,7 +166,7 @@ void tap(State& state, int x, int y, uint64_t now_ms) {
     const int first_end = pages.count == 2 ? kNavigationTop : kOverviewSplit;
     if (y >= kNavigationTop)
         swipe(state, x < kDisplayWidth / 2 ? -1 : 1, now_ms);
-    else if (page == Page::Overview && y >= kHeaderBottom && y < first_end)
+    else if (page == Page::Overview && y < first_end)
         restore_page(state, pages.pages[1], now_ms);
     else if (page == Page::Overview && pages.count == 3 && y >= kOverviewSplit)
         restore_page(state, pages.pages[2], now_ms);

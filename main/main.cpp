@@ -62,7 +62,7 @@ void identity(const pipkin::State& state, uint64_t now) {
     const int count =
         std::snprintf(reply, sizeof(reply),
                       "v=1 kind=identity product=pipkin firmware=%s chip=esp32 board=%s "
-                      "hardware=%s protocol_min=1 protocol_max=1 seq=%" PRIu64
+                      "hardware=%s protocol_min=1 protocol_max=2 seq=%" PRIu64
                       " clock_epoch=%" PRIu64 " unix=%s\n",
                       esp_app_get_description()->version, board::kProfile, board::kHardware,
                       state.last_sequence, state.clock.observation_epoch, unix_time);

@@ -11,7 +11,7 @@ check() {
     c++ $flags "$@" -o "$out/$name"
     "$out/$name"
 }
-check core src/model.cpp src/protocol.cpp tests/core_test.cpp
+check core src/model.cpp src/protocol.cpp src/demo.cpp tests/core_test.cpp
 check render src/model.cpp src/render.cpp tests/render_check.cpp
 check hardware -Imain tests/hardware_check.cpp
 python3 -B -m unittest discover -s tests -p '*_test.py'

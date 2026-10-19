@@ -1,3 +1,4 @@
+#include "pipkin/demo.h"
 #include "pipkin/model.h"
 
 #include <cassert>
@@ -907,6 +908,54 @@ void helper_fixture() {
     assert(state.tasks[0].coverage == TaskCoverage::Unknown);
 }
 
+void demo_reel() {
+    constexpr int64_t moment = 1791423660;
+    State state;
+    start_boot(state, 0);
+    const auto run = [&](uint64_t from, uint64_t to) {
+        for (uint64_t now = from; now <= to; now += 20) {
+            play_demo(state, now);
+            idle(state, now);
+        }
+    };
+    run(0, 3180);
+    assert(!state.clock.anchor_unix && !provider_visible(state, Provider::Codex));
+    run(3200, 3200);
+    const auto& codex = state.providers[0];
+    const auto& claude = state.providers[1];
+    assert(unix_now(state, 3200) == moment && state.clock.utc_offset_minutes == 480);
+    assert(state.host == HostState::Awake && state.boot.ready_ms == 3200);
+    assert(codex.session.used_tenths == 480 && codex.weekly.used_tenths == 820);
+    assert(codex.session.reset_unix == moment + 5399 && codex.banked_resets == 2);
+    assert(claude.session.used_tenths == 370 && claude.weekly.used_tenths == 550);
+    assert(claude.weekly.reset_unix == moment + 3 * 86400);
+    assert(codex.app == AppState::Available && claude.app == AppState::Available);
+    assert(state.tasks[0].working == 2 && state.tasks[0].attention == 1);
+    assert(state.tasks[1].working == 1 && visible_pages(state).count == 3);
+    run(3220, 7200);
+    assert(!state.boot.active && effective_page(state) == Page::Overview);
+    run(7220, 11180);
+    assert(effective_page(state) == Page::Overview);
+    run(11200, 11200);
+    assert(effective_page(state) == Page::Codex && state.page_entered_ms == 11200);
+    run(11220, 15200);
+    assert(effective_page(state) == Page::Claude);
+    run(15220, 19200);
+    assert(effective_page(state) == Page::Overview);
+
+    // An hour on, it is still 09:41 with fresh readings and tasks, on a lit screen.
+    run(3600000, 3600000);
+    assert(unix_now(state, 3600000) == moment && backlight_level(state, 3600000) == 100);
+    assert(!codex.weekly.freshness.known_stale(3600000) && tasks_current(state.tasks[0], 3600000));
+
+    // The tour waits while the status page is open.
+    state.about_open = true;
+    state.touched_ms = 3600000;
+    const auto page = state.page;
+    run(3600020, 3610000);
+    assert(state.page == page);
+}
+
 } // namespace
 
 int main() {
@@ -932,5 +981,6 @@ int main() {
     unsequenced_senders();
     task_counts();
     helper_fixture();
+    demo_reel();
     std::cout << "Core protocol, state, clock and navigation checks passed.\n";
 }

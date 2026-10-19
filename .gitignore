@@ -1,4 +1,5 @@
 /build/
+/build-demo/
 /sdkconfig
 /sdkconfig.old
 .DS_Store

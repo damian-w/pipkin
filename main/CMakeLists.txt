@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.cpp" "display.cpp" "../src/model.cpp" "../src/protocol.cpp" "../src/render.cpp"
+    SRCS "main.cpp" "display.cpp" "../src/model.cpp" "../src/protocol.cpp" "../src/render.cpp" "../src/demo.cpp"
     INCLUDE_DIRS "." "../include"
     REQUIRES esp_app_format esp_driver_gpio esp_driver_ledc esp_driver_spi esp_driver_uart esp_lcd esp_timer nvs_flash
 )
@@ -13,4 +13,5 @@ if(git_result EQUAL 0)
 else()
     set(PIPKIN_GIT_REVISION "Uncommitted")
 endif()
-target_compile_definitions(${COMPONENT_LIB} PRIVATE PIPKIN_GIT_REVISION="${PIPKIN_GIT_REVISION}")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE PIPKIN_GIT_REVISION="${PIPKIN_GIT_REVISION}"
+    PIPKIN_DEMO=$<BOOL:${PIPKIN_DEMO}>)

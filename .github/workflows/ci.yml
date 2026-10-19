@@ -28,9 +28,10 @@ jobs:
           . "$IDF_PATH/export.sh"
           idf.py set-target esp32
           idf.py build
+          idf.py -B build-demo -DPIPKIN_DEMO=ON build
           tag=()
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag=(--tag "$GITHUB_REF_NAME"); fi
-          python3 -B scripts/package_firmware.py "${tag[@]}" --output-dir dist
+          python3 -B scripts/package_firmware.py "${tag[@]}" --demo-build-dir build-demo --output-dir dist
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

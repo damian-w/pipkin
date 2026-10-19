@@ -1,6 +1,7 @@
 #include "board.h"
 #include "display.h"
 #include "line_reader.h"
+#include "pipkin/demo.h"
 #include "pipkin/model.h"
 #include "pipkin/render.h"
 
@@ -21,6 +22,9 @@
 #include <cstdio>
 
 namespace {
+
+// The demo reel build plays the product tour and only answers identify.
+constexpr bool kDemo = PIPKIN_DEMO;
 
 constexpr int kBands = pipkin::kDisplayHeight / kDisplayBandRows;
 static_assert(pipkin::kDisplayHeight % kDisplayBandRows == 0);
@@ -81,8 +85,9 @@ extern "C" void app_main() {
     state.device_info.firmware_version = esp_app_get_description()->version;
     state.device_info.git_revision = PIPKIN_GIT_REVISION;
     nvs_handle_t settings = 0;
-    // A damaged or newer settings partition is preserved for recovery.
-    if (nvs_flash_init() == ESP_OK && nvs_open("pipkin", NVS_READWRITE, &settings) == ESP_OK) {
+    // A damaged or newer settings partition is preserved for recovery. The demo saves nothing.
+    if (!kDemo && nvs_flash_init() == ESP_OK &&
+        nvs_open("pipkin", NVS_READWRITE, &settings) == ESP_OK) {
         uint8_t page = 0;
         if (nvs_get_u8(settings, "page", &page) == ESP_OK) {
             pipkin::restore_page(state, static_cast<pipkin::Page>(page));
@@ -128,7 +133,7 @@ extern "C" void app_main() {
             reader.push(bytes[i], [&](std::string_view line) {
                 if (line == pipkin::kIdentifyRequest) {
                     identity(state, now);
-                } else if (pipkin::ingest(state, line, now)) {
+                } else if (!kDemo && pipkin::ingest(state, line, now)) {
                     dirty = true;
                 }
             });
@@ -139,6 +144,8 @@ extern "C" void app_main() {
         const bool pressed = touch_read(x, y);
         const auto previous_view = pipkin::effective_page(state);
         pipkin::touch(state, pressed, x, y, now);
+        if (kDemo)
+            pipkin::play_demo(state, now);
         pipkin::idle(state, now);
         dirty = dirty || pipkin::effective_page(state) != previous_view;
         const auto page = state.page;

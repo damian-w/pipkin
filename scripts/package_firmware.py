@@ -76,15 +76,32 @@ def validate_image(data, name):
     require(hashlib.sha256(data[:-32]).digest() == data[-32:], f"{name}: image digest mismatch")
 
 
-def validate_application(data, version, revision):
-    require(len(data) >= 288, "application: missing ESP-IDF app description")
+def validate_application(data, version, revision, board, name="application"):
+    require(len(data) >= 288, f"{name}: missing ESP-IDF app description")
     require(struct.unpack_from("<I", data, 32)[0] == 0xABCD5432,
-            "application: missing ESP-IDF app description")
-    require(c_string(data[48:80]) == version, "application: firmware version differs from release tag")
-    require(c_string(data[80:112]) == "pipkin", "application: project name is not pipkin")
-    require(c_string(data[144:176]) == SDK_VERSION, f"application: expected ESP-IDF {SDK_VERSION}")
+            f"{name}: missing ESP-IDF app description")
+    require(c_string(data[48:80]) == version, f"{name}: firmware version differs from release tag")
+    require(c_string(data[80:112]) == "pipkin", f"{name}: project name is not pipkin")
+    require(c_string(data[144:176]) == SDK_VERSION, f"{name}: expected ESP-IDF {SDK_VERSION}")
     require(revision[:12].encode("ascii") + b"\0" in data,
-            "application: source revision differs from the selected Git commit; rebuild first")
+            f"{name}: source revision differs from the selected Git commit; rebuild first")
+    require(board.encode("ascii") + b"\0" in data,
+            f"{name}: compiled board profile differs from main/board.h; rebuild first")
+
+
+def demo_application(build_dir, version, revision, board):
+    """The demo reel build (-DPIPKIN_DEMO=ON), which pipkin flash --demo writes in place of
+    pipkin.bin. It is versioned <version>-demo and stays out of firmware.json."""
+    build_dir = Path(build_dir).resolve()
+    project = json.loads((build_dir / "project_description.json").read_text())
+    require(project["project_name"] == "pipkin" and project["target"] == "esp32",
+            "demo: expected a pipkin ESP32 build")
+    require(project["project_version"] == f"{version}-demo", "demo: build version differs from the release")
+    data = (build_dir / "pipkin.bin").read_bytes()
+    require(0 < len(data) <= 0x100000, "demo: image does not fit its flash region")
+    validate_image(data, "demo")
+    validate_application(data, f"{version}-demo", revision, board, "demo")
+    return data
 
 
 def validate_partitions(data):
@@ -135,7 +152,7 @@ def third_party_notices(project, source_dir):
     return "".join(sections).encode("utf-8")
 
 
-def package(build_dir, output_dir, source_dir, revision, tag=None):
+def package(build_dir, output_dir, source_dir, revision, tag=None, demo_build_dir=None):
     build_dir = Path(build_dir).resolve()
     output_dir = Path(output_dir).resolve()
     source_dir = Path(source_dir).resolve()
@@ -171,9 +188,7 @@ def package(build_dir, output_dir, source_dir, revision, tag=None):
         else:
             validate_image(data, role)
         if role == "application":
-            validate_application(data, version, revision)
-            require(board.encode("ascii") + b"\0" in data,
-                    "application: compiled board profile differs from main/board.h; rebuild first")
+            validate_application(data, version, revision, board)
         payloads[filename] = data
         images.append({"role": role, "file": filename, "offset": offset,
                        "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
@@ -182,6 +197,8 @@ def package(build_dir, output_dir, source_dir, revision, tag=None):
     manifest = {"product": "pipkin", "version": version, "source_revision": revision,
                 "board": board, "images": images}
     payloads["firmware.json"] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    if demo_build_dir is not None:
+        payloads["pipkin-demo.bin"] = demo_application(demo_build_dir, version, revision, board)
     payloads["LICENSE"] = (source_dir / "LICENSE").read_bytes()
     payloads["NOTICE.md"] = (source_dir / "assets/NOTICE.md").read_text().replace(
         "[LICENSE](../LICENSE)", "[LICENSE](LICENSE)").encode("utf-8")
@@ -200,6 +217,7 @@ def package(build_dir, output_dir, source_dir, revision, tag=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, default=Path("build"))
+    parser.add_argument("--demo-build-dir", type=Path, help="Also package this demo reel build")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--source-dir", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--source-revision", help="Full Git commit SHA; defaults to source HEAD")
@@ -208,7 +226,8 @@ def main():
     try:
         revision = args.source_revision or subprocess.check_output(
             ["git", "-C", str(args.source_dir), "rev-parse", "HEAD"], text=True).strip()
-        manifest = package(args.build_dir, args.output_dir, args.source_dir, revision, args.tag)
+        manifest = package(args.build_dir, args.output_dir, args.source_dir, revision, args.tag,
+                           args.demo_build_dir)
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Cannot package firmware: {error}\n")
     print(f"Packaged Pipkin {manifest['version']} ({manifest['source_revision'][:12]}) in {args.output_dir}")

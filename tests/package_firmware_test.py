@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import shutil
 import struct
 import tempfile
 import unittest
@@ -87,10 +88,19 @@ class PackagingTest(unittest.TestCase):
             "app": {"file": "pipkin.bin", "offset": "0x10000", "encrypted": "false"},
         }
 
-    def package(self, tag="v1.0.0"):
+    def package(self, tag="v1.0.0", demo=None):
         (self.build / "project_description.json").write_text(json.dumps(self.project))
         (self.build / "flasher_args.json").write_text(json.dumps(self.config))
-        return PACKAGER.package(self.build, self.output, SOURCE, REVISION, tag)
+        return PACKAGER.package(self.build, self.output, SOURCE, REVISION, tag, demo)
+
+    def demo_build(self, version="1.0.0-demo", app_version=None):
+        self.package(demo=None)
+        shutil.rmtree(self.output)
+        demo = self.root / "build-demo"
+        shutil.copytree(self.build, demo)
+        (demo / "project_description.json").write_text(json.dumps({**self.project, "project_version": version}))
+        (demo / "pipkin.bin").write_bytes(application(version=app_version or version))
+        return demo
 
     def rejected(self, message, tag="v1.0.0"):
         with self.assertRaisesRegex(ValueError, message):
@@ -121,6 +131,28 @@ class PackagingTest(unittest.TestCase):
             data = (self.output / image["file"]).read_bytes()
             self.assertEqual(image["size"], len(data))
             self.assertEqual(image["sha256"], hashlib.sha256(data).hexdigest())
+
+    def test_demo_reel_is_an_extra_checked_asset(self):
+        demo = self.demo_build()
+        manifest = self.package(demo=demo)
+        self.assertEqual([image["file"] for image in manifest["images"]],
+                         ["bootloader.bin", "partition-table.bin", "pipkin.bin"])
+        self.assertEqual((self.output / "pipkin-demo.bin").read_bytes(), (demo / "pipkin.bin").read_bytes())
+        self.assertNotIn("demo", (self.output / "firmware.json").read_text())
+        sums = dict(reversed(line.split("  ")) for line in (self.output / "SHA256SUMS").read_text().splitlines())
+        self.assertEqual(sums["pipkin-demo.bin"], hashlib.sha256((demo / "pipkin.bin").read_bytes()).hexdigest())
+
+    def test_rejects_a_demo_reel_from_another_version(self):
+        for version in ["1.0.1-demo", "1.0.0"]:
+            with self.subTest(version=version):
+                demo = self.demo_build(version=version)
+                with self.assertRaisesRegex(ValueError, "demo: build version"):
+                    self.package(demo=demo)
+                self.assertFalse(self.output.exists())
+                shutil.rmtree(demo)
+        demo = self.demo_build(app_version="1.0.0")
+        with self.assertRaisesRegex(ValueError, "demo: firmware version"):
+            self.package(demo=demo)
 
     def test_rejects_wrong_tag(self):
         self.rejected("release tag", "v1.0.1")

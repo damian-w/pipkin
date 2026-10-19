@@ -32,7 +32,6 @@ constexpr int64_t kMinUnix = 1577836800;
 constexpr int64_t kMaxUnix = 4102444800;
 // The protocol version is the major version shared with the CLI; every record carries it.
 #define PIPKIN_PROTOCOL "2"
-constexpr std::string_view kProtocolVersion = PIPKIN_PROTOCOL;
 constexpr std::string_view kIdentifyRequest = "v=" PIPKIN_PROTOCOL " kind=identify";
 constexpr std::size_t kMaxPacketBytes = 768;
 constexpr uint64_t kStaleAfterMs = 5 * 60 * 1000;
@@ -60,7 +59,6 @@ enum class Page : uint8_t { Overview, Codex, Claude, About };
 enum class AllowanceState : uint8_t { Unknown, Metered, NoCap, NotStarted, Unsupported };
 enum class AppState : uint8_t { Unknown, Available, Unavailable, Unsupported };
 enum class HostState : uint8_t { Unknown, Awake, Asleep, Disconnected };
-enum class Overlay : uint8_t { None, Sleep };
 enum class TaskCoverage : uint8_t { Unknown, Partial, Unavailable, Unsupported };
 
 struct Freshness {
@@ -91,7 +89,6 @@ struct Window {
 struct ProviderData {
     std::array<char, 33> account{};
     AppState app = AppState::Unknown;
-    uint64_t app_received_ms = 0;
     Window session;
     Window weekly;
     std::optional<uint32_t> banked_resets;
@@ -150,7 +147,6 @@ struct State {
     std::optional<uint64_t> host_received_ms;
     std::optional<uint64_t> host_woke_ms;
     bool transport_connected = false;
-    Overlay overlay = Overlay::None;
     Page page = Page::Overview;
     bool about_open = false;
     DeviceInfo device_info;
@@ -177,6 +173,8 @@ bool metered(const Window& window);
 bool usable(const Window& window);
 // Restarts the page reveal.
 void view_changed(State& state, uint64_t now_ms);
+// Applies one record without its line ending, which LineReader strips; a rejected record
+// changes nothing.
 bool ingest(State& state, std::string_view line, uint64_t now_ms);
 // Partial counts observed recently by the synchronized clock; anything else shows no tasks.
 bool tasks_current(const Tasks& tasks, uint64_t now_ms);

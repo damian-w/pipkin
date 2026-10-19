@@ -35,7 +35,7 @@ void lcd_command(int command, const void* bytes = nullptr, std::size_t length = 
 #if PIPKIN_BOARD_ES3C40P
 i2c_master_dev_handle_t touch;
 
-// Holds the FT6336U in reset until the panel is ready; it needs time to start afterwards.
+// Resets the FT6336U; the panel's start-up commands give it time to start before touch_init().
 void touch_reset() {
     gpio_config_t reset{};
     reset.pin_bit_mask = 1ULL << board::kTouchReset;
@@ -172,24 +172,21 @@ void display_init() {
 #endif
 }
 
-void display_rows(int y, int rows, const uint16_t* pixels) {
-    ESP_ERROR_CHECK(y >= 0 && rows > 0 && rows <= kDisplayBandRows && y + rows <= kHeight
-                        ? ESP_OK
-                        : ESP_ERR_INVALID_ARG);
+void display_rows(int y, const uint16_t* pixels) {
     // Parameter writes drain queued colour transfers, so this buffer's previous band has been sent.
     auto* buffer = band_buffers[next_buffer];
     next_buffer ^= 1;
-    for (int i = 0; i < rows * kWidth; ++i) {
+    for (int i = 0; i < kDisplayBandRows * kWidth; ++i) {
         buffer[i * 2] = pixels[i] >> 8;
         buffer[i * 2 + 1] = pixels[i] & 0xff;
     }
     const uint8_t columns[] = {0, 0, (kWidth - 1) >> 8, (kWidth - 1) & 0xff};
-    const int last = y + rows - 1;
+    const int last = y + kDisplayBandRows - 1;
     const uint8_t range[] = {static_cast<uint8_t>(y >> 8), static_cast<uint8_t>(y & 0xff),
                              static_cast<uint8_t>(last >> 8), static_cast<uint8_t>(last & 0xff)};
     lcd_command(0x2A, columns, sizeof(columns));
     lcd_command(0x2B, range, sizeof(range));
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(lcd, 0x2C, buffer, rows * kWidth * sizeof(uint16_t)));
+    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(lcd, 0x2C, buffer, kBandBytes));
 }
 
 bool touch_read(int& x, int& y) {

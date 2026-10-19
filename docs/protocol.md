@@ -1,9 +1,10 @@
 # Display protocol, version 2
 
-Pipkin receives allowance, clock, host status and local task counts over serial at
-115200 baud, 8N1. The CLI reads the providers and sends these records. Credentials,
-prompts, task content, token totals and monetary balances stay off the wire; the
-protocol has no reset-redemption commands.
+Pipkin receives allowance, clock, host status and local task counts over serial: on
+the 2.8-inch CYD, UART at 115200 baud, 8N1; on the 4-inch ES3C40P, the ESP32-S3's
+USB serial port, where the baud rate doesn't matter. The CLI reads the providers and
+sends these records. Credentials, prompts, task content, token totals and monetary
+balances stay off the wire; the protocol has no reset-redemption commands.
 
 Each record contains ASCII `key=value` pairs separated by one space, terminated
 by LF or CRLF. State-changing keys may appear in any order; the identity request
@@ -237,10 +238,10 @@ unknown tasks, task identities, titles and source update times stay on the
 computer.
 
 `observed` is when the computer finished collecting, with the same bounds and
-30-second future limit as usage; it cannot be `null`. Records must carry the
-current `clock_epoch` and must not regress the provider's previous task
-observation. The sender should send a record for each provider whenever its counts
-change, at least every 15 seconds, and immediately on resync. The display shows
+30-second future limit as usage; it cannot be `null`. Records follow the usage
+`clock_epoch` rule and must not regress the provider's previous task observation.
+The sender should send a record for each provider whenever its counts change, at
+least every 15 seconds, and immediately on resync. The display shows
 counts only while their observation is under 45 seconds old by its synchronized
 clock, so counts from a stopped collector disappear rather than becoming zero.
 Host `asleep` and `disconnected` reports and a clock rebase clear all task counts.
@@ -261,6 +262,7 @@ Overview is always available. Swipe left/right or tap the right/left half of the
 bottom strip to cycle through visible pages, wrapping at either end. Overview
 provider cards, which start at the top of the screen, open their detail pages.
 
+Sizes and distances are layout pixels, which the 4-inch display draws 4/3 larger.
 Current task counts appear as 6-pixel dots right-aligned on the provider name row
 of Overview and each provider page: one per observed task, working (blue), then
 needing attention (amber), then blocked (red). Above six tasks, each status shows

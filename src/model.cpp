@@ -134,7 +134,7 @@ bool on_screen(int x, int y) {
 
 // A tap or swipe first closes About; navigating needs a second page.
 bool navigable(State& state, uint64_t now_ms) {
-    if (state.overlay != Overlay::None)
+    if (state.host == HostState::Asleep)
         return false;
     if (state.about_open) {
         show_about(state, false, now_ms);
@@ -188,7 +188,7 @@ void swipe(State& state, int direction, uint64_t now_ms) {
 
 void touch(State& state, bool pressed, int x, int y, uint64_t now_ms) {
     auto& gesture = state.gesture;
-    if (state.overlay != Overlay::None || (pressed && !on_screen(x, y)) ||
+    if (state.host == HostState::Asleep || (pressed && !on_screen(x, y)) ||
         (gesture.active && now_ms < gesture.started_ms) ||
         (gesture.release_started_ms && now_ms < *gesture.release_started_ms)) {
         gesture = TouchGesture{};
@@ -276,7 +276,7 @@ std::optional<uint64_t> newest_reading_age_ms(const State& state, uint64_t now_m
 }
 
 uint8_t backlight_level(const State& state, uint64_t now_ms) {
-    if (state.overlay == Overlay::Sleep)
+    if (state.host == HostState::Asleep)
         return 0;
     if (state.touched_ms && now_ms >= state.touched_ms && now_ms - state.touched_ms < kTouchWakeMs &&
         (state.host != HostState::Disconnected ||

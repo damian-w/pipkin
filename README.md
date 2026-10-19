@@ -98,7 +98,6 @@ To build the firmware yourself, see the [developer guide](docs/development.md).
 
 <p>
   <img src="docs/images/badge-licence.svg" alt="Licence: noncommercial" height="28">
-  <img src="docs/images/badge-board.svg" alt="Board: ESP32 CYD" height="28">
   <img src="docs/images/badge-runs-on.svg" alt="Runs on macOS, Linux and Windows" height="28">
 </p>
 

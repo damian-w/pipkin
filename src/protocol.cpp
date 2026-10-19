@@ -34,11 +34,6 @@ struct Packet {
 };
 
 bool tokenize(std::string_view line, Packet& packet) {
-    if (!line.empty() && line.back() == '\n') {
-        line.remove_suffix(1);
-        if (!line.empty() && line.back() == '\r')
-            line.remove_suffix(1);
-    }
     if (line.empty() || line.size() > kMaxPacketBytes)
         return false;
     for (const char c : line)
@@ -74,6 +69,18 @@ bool number(std::optional<std::string_view> text, T minimum, T maximum, T& value
     const auto result = std::from_chars(text->data(), text->data() + text->size(), parsed);
     if (result.ec != std::errc{} || result.ptr != text->data() + text->size() || parsed < minimum ||
         parsed > maximum)
+        return false;
+    value = parsed;
+    return true;
+}
+
+// An absent or null value stays unknown.
+template <typename T>
+bool nullable(std::optional<std::string_view> text, T minimum, T maximum, std::optional<T>& value) {
+    if (!text || text == "null")
+        return true;
+    T parsed{};
+    if (!number(text, minimum, maximum, parsed))
         return false;
     value = parsed;
     return true;
@@ -174,19 +181,8 @@ bool window(const Packet& packet, bool session, Window& result, const Window& pr
         }
     } else if (used)
         return false;
-    if (reset && reset != "null") {
-        int64_t value = 0;
-        if (!number<int64_t>(reset, kMinUnix, kMaxUnix, value))
-            return false;
-        result.reset_unix = value;
-    }
-    if (seconds && seconds != "null") {
-        uint32_t value = 0;
-        if (!number<uint32_t>(seconds, 1, 366 * 24 * 60 * 60, value))
-            return false;
-        result.duration_seconds = value;
-    }
-    return true;
+    return nullable<int64_t>(reset, kMinUnix, kMaxUnix, result.reset_unix) &&
+           nullable<uint32_t>(seconds, 1, 366 * 24 * 60 * 60, result.duration_seconds);
 }
 
 bool usage(const Packet& packet, State& state, uint64_t now_ms) {
@@ -210,7 +206,6 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
             return false;
         data = ProviderData{};
         data.app = AppState::Unavailable;
-        data.app_received_ms = now_ms;
         return true;
     }
     if (!identifier(*account))
@@ -221,12 +216,9 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
     if ((mode == "patch" && !same_account) || !current_epoch(packet, state))
         return false;
     std::optional<int64_t> observed;
-    if (packet.get("observed") != "null") {
-        int64_t value = 0;
-        if (!number<int64_t>(packet.get("observed"), kMinUnix, kMaxUnix, value))
-            return false;
-        observed = value;
-    }
+    if (!packet.get("observed") ||
+        !nullable<int64_t>(packet.get("observed"), kMinUnix, kMaxUnix, observed))
+        return false;
     const auto now = unix_now(state, now_ms);
     if (now && observed && *observed > *now + 30)
         return false;
@@ -238,10 +230,7 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
             !freshness(data.weekly.freshness, previous.weekly.freshness, observed, state, now_ms) ||
             !freshness(data.banked_freshness, previous.banked_freshness, observed, state, now_ms))
             return false;
-        if (same_account) {
-            data.app = previous.app;
-            data.app_received_ms = previous.app_received_ms;
-        }
+        data.app = previous.app;
     }
     data.account = account_id;
     if (!window(packet, true, data.session, previous.session, observed, state, now_ms) ||
@@ -250,14 +239,9 @@ bool usage(const Packet& packet, State& state, uint64_t now_ms) {
     const auto banked = packet.get("banked");
     if (banked) {
         data.banked_resets.reset();
-        if (!freshness(data.banked_freshness, previous.banked_freshness, observed, state, now_ms))
+        if (!freshness(data.banked_freshness, previous.banked_freshness, observed, state, now_ms) ||
+            !nullable<uint32_t>(banked, 0, 1000000, data.banked_resets))
             return false;
-        if (banked != "null") {
-            uint32_t value = 0;
-            if (!number<uint32_t>(banked, 0, 1000000, value))
-                return false;
-            data.banked_resets = value;
-        }
     }
     return true;
 }
@@ -301,7 +285,7 @@ bool tasks(const Packet& packet, State& state, uint64_t now_ms) {
     return true;
 }
 
-bool apply(const Packet& packet, State& state, uint64_t now_ms) {
+bool apply(const Packet& packet, State& state, uint64_t sequence, uint64_t now_ms) {
     const auto kind = packet.get("kind");
     if (kind == "usage")
         return usage(packet, state, now_ms);
@@ -321,11 +305,10 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
         const auto previous = unix_now(state, now_ms);
         if (previous && (epoch < *previous - 300 || epoch > *previous + 300) && !rebase)
             return false;
-        uint64_t observation_epoch = state.clock.observation_epoch;
-        if (rebase && !number<uint64_t>(packet.get("seq"), 1, std::numeric_limits<uint64_t>::max(),
-                                        observation_epoch))
+        // A rebase's sequence number becomes the new observation epoch.
+        if (rebase && !sequence)
             return false;
-        state.clock = {epoch, now_ms, offset, observation_epoch};
+        state.clock = {epoch, now_ms, offset, rebase ? sequence : state.clock.observation_epoch};
         // A rebase follows a wake or clock jump; earlier task lists no longer apply.
         if (rebase)
             state.tasks = {};
@@ -353,10 +336,6 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
         // Never carry working or attention dots across host sleep or helper exit.
         if (state.host != HostState::Awake)
             state.tasks = {};
-        if (state.host == HostState::Asleep && state.overlay == Overlay::None)
-            state.overlay = Overlay::Sleep;
-        else if (state.host != HostState::Asleep && state.overlay == Overlay::Sleep)
-            state.overlay = Overlay::None;
         return true;
     }
     if (kind == "app") {
@@ -378,7 +357,6 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
             data.app = AppState::Unavailable;
         } else
             return false;
-        data.app_received_ms = now_ms;
         return true;
     }
     return false;
@@ -389,7 +367,7 @@ bool apply(const Packet& packet, State& state, uint64_t now_ms) {
 bool ingest(State& state, std::string_view line, uint64_t now_ms) {
     Packet packet;
     uint64_t sequence = 0;
-    if (!tokenize(line, packet) || packet.get("v") != kProtocolVersion ||
+    if (!tokenize(line, packet) || packet.get("v") != PIPKIN_PROTOCOL ||
         now_ms < state.last_received_ms)
         return false;
     // Sequence is optional so stateless senders need no identify round trip; usage ordering is
@@ -405,7 +383,7 @@ bool ingest(State& state, std::string_view line, uint64_t now_ms) {
         next.host_received_ms.reset();
     }
     next.transport_connected = true;
-    if (!apply(packet, next, now_ms))
+    if (!apply(packet, next, sequence, now_ms))
         return false;
     const auto lost = [&](Page page, Provider provider) {
         return state.page == page && provider_visible(state, provider) &&

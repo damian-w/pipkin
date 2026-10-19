@@ -156,7 +156,7 @@ void reject_invalid_packets() {
     assert(!feed.send(patch + "1800000031 banked=0"));
     assert(feed.send(usage + "session=metered session_id=next session_used=1000"));
     assert(feed.state.providers[0].session.used_tenths == 1000);
-    assert(feed.send("kind=host state=awake\r\n", 1));
+    assert(feed.send("kind=host state=awake", 1));
     assert(!feed.send("kind=host state=awake", 0));
 }
 
@@ -189,7 +189,7 @@ void clock_freshness_and_liveness() {
     assert(feed.send("kind=host state=awake", 311000));
     assert(host_alive(feed.state, 370999));
     assert(!host_alive(feed.state, 371000));
-    assert(feed.state.host == HostState::Awake && feed.state.overlay == Overlay::None);
+    assert(feed.state.host == HostState::Awake);
     assert(feed.send("kind=app provider=codex state=unavailable", 371000));
     assert(data.session.used_tenths == 650);
     assert(!host_alive(feed.state, 371000));
@@ -279,11 +279,11 @@ void navigation_and_overlays() {
     assert(selected_page(feed.state) == Page::Claude);
     assert(feed.state.view_revision == revision && feed.state.page_entered_ms == 2700);
     assert(feed.send("kind=host state=asleep", 3000));
-    assert(feed.state.overlay == Overlay::Sleep);
+    assert(feed.state.host == HostState::Asleep);
     tap(feed.state, 5, 215, 3100);
     assert(selected_page(feed.state) == Page::Claude);
     assert(feed.send("kind=host state=awake", 3200));
-    assert(feed.state.overlay == Overlay::None && selected_page(feed.state) == Page::Claude);
+    assert(feed.state.host == HostState::Awake && selected_page(feed.state) == Page::Claude);
     assert(feed.state.view_revision == revision);
     assert(feed.send("kind=app provider=claude state=unavailable", 3500));
     assert(selected_page(feed.state) == Page::Claude && feed.state.view_revision == revision);
@@ -740,7 +740,7 @@ void host_power_backlight() {
     assert(feed.send("kind=host state=awake", 0));
     assert(backlight_level(feed.state, kHostPresenceMs - 1) == 100);
     assert(backlight_level(feed.state, kHostPresenceMs) == 0);
-    assert(feed.state.host == HostState::Awake && feed.state.overlay == Overlay::None);
+    assert(feed.state.host == HostState::Awake);
     assert(!host_alive(feed.state, kHostPresenceMs));
 
     // Recovering host presence lights the screen without waiting for an API read.
@@ -759,7 +759,7 @@ void host_power_backlight() {
     touch(feed.state, true, 100, 100, stale + 62001);
     assert(feed.send("kind=host state=disconnected", stale + 63000));
     assert(backlight_level(feed.state, stale + 63000) == 0);
-    assert(feed.state.host == HostState::Disconnected && feed.state.overlay == Overlay::None);
+    assert(feed.state.host == HostState::Disconnected);
 
     // Generic traffic cannot keep a host's expired heartbeat alive.
     Feed noisy;
@@ -886,9 +886,9 @@ void helper_fixture() {
             line.find("state=asleep") != std::string::npos)
             assert(!tasks_current(state.tasks[0], now) && !tasks_current(state.tasks[1], now));
         if (line.find("kind=host state=asleep") != std::string::npos)
-            assert(state.overlay == Overlay::Sleep && backlight_level(state, now) == 0);
+            assert(state.host == HostState::Asleep && backlight_level(state, now) == 0);
         if (line.find("kind=host state=awake") != std::string::npos)
-            assert(state.overlay == Overlay::None && backlight_level(state, now) == 100);
+            assert(state.host == HostState::Awake && backlight_level(state, now) == 100);
         if (line.find("session=not_started") != std::string::npos) {
             const auto& claude = state.providers[1];
             assert(claude.session.state == AllowanceState::NotStarted);

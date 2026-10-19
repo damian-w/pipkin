@@ -11,7 +11,6 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -51,7 +50,7 @@ struct Presenter {
             if (initialized && hash == hashes[i])
                 continue;
             hashes[i] = hash;
-            display_rows(top, kDisplayBandRows, band);
+            display_rows(top, band);
         }
         initialized = true;
     }
@@ -109,10 +108,8 @@ extern "C" void app_main() {
         char bytes[512];
         bool lost = false;
         const int count = link_read(bytes, sizeof(bytes), pdMS_TO_TICKS(20), lost);
-        if (lost) {
-            reader.size = 0;
+        if (lost)
             reader.overflow = true;
-        }
         for (int i = 0; i < count; ++i) {
             reader.push(bytes[i], [&](std::string_view line) {
                 if (line == pipkin::kIdentifyRequest) {

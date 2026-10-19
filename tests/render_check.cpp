@@ -43,7 +43,7 @@ int main() {
                                       std::not_equal_to<uint16_t>()) != guarded.end() - 1);
         }
     }
-    state.overlay = pipkin::Overlay::Sleep;
+    state.host = pipkin::HostState::Asleep;
     pipkin::render(state, 0, guarded.data() + 1);
     assert(guarded.front() == 0xbeef && guarded.back() == 0xbeef);
 
@@ -285,7 +285,7 @@ int main() {
         assert(banded(state, now, 16) == frame(state, now));
     }
     assert(frame(state, 18500 + pipkin::kBootFinishMs) == blank);
-    state.overlay = pipkin::Overlay::Sleep;
+    state.host = pipkin::HostState::Asleep;
     assert(!pipkin::animation_active(state, 1000) && frame(state, 1000) == frame(state, 2000));
     std::puts("Render bounds, remaining, reset visibility, reveal, clock, task dot, About and boot "
               "checks passed");

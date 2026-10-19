@@ -43,7 +43,6 @@ constexpr LcdCommand kLcdInit[] = {
 constexpr int kTouchSda = 16;
 constexpr int kTouchScl = 15;
 constexpr int kTouchReset = 18;
-constexpr int kTouchInterrupt = 17;
 constexpr uint8_t kTouchAddress = 0x38;
 constexpr int kTouchWidth = 320;
 constexpr int kTouchHeight = 480;

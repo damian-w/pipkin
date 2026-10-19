@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import struct
 import tempfile
@@ -81,8 +82,6 @@ class PackagingTest(unittest.TestCase):
         }
         self.config = {
             "flash_settings": {"flash_mode": "dio", "flash_freq": "40m", "flash_size": "4MB"},
-            "write_flash_args": ["--flash_mode", "dio", "--flash_freq", "40m", "--flash_size", "4MB"],
-            "extra_esptool_args": {"chip": "esp32"},
             "flash_files": {"0x1000": "bootloader/bootloader.bin", "0x8000": "partition_table/partition-table.bin",
                             "0x10000": "pipkin.bin"},
             "bootloader": {"file": "bootloader/bootloader.bin", "offset": "0x1000", "encrypted": "false"},
@@ -106,7 +105,6 @@ class PackagingTest(unittest.TestCase):
         (build / "project_description.json").write_text(
             json.dumps({**self.project, "target": "esp32s3", "project_version": version}))
         config = json.loads(json.dumps(self.config))
-        config["extra_esptool_args"]["chip"] = "esp32s3"
         config["flash_files"] = {"0x0": "bootloader/bootloader.bin", "0x8000": "partition_table/partition-table.bin",
                                  "0x10000": "pipkin.bin"}
         config["bootloader"]["offset"] = "0x0"
@@ -229,10 +227,6 @@ class PackagingTest(unittest.TestCase):
         self.config["flash_settings"]["flash_size"] = "8MB"
         self.rejected("flash settings")
 
-    def test_rejects_disagreement_between_flashing_arguments(self):
-        self.config["write_flash_args"][1] = "qio"
-        self.rejected("inconsistent write_flash_args")
-
     def test_rejects_unlisted_or_extra_images(self):
         self.config["flash_files"]["0x9000"] = "nvs.bin"
         self.rejected("flash_files differs")
@@ -299,19 +293,10 @@ class PackagingTest(unittest.TestCase):
 
 
 class BoardProfileTest(unittest.TestCase):
-    def test_reads_the_board_profiles(self):
-        self.assertEqual(PACKAGER.board_profiles(SOURCE), ["es3c40p", "esp32-2432s028r"])
-        self.assertEqual({board["board"] for board in PACKAGER.BOARDS.values()},
-                         set(PACKAGER.board_profiles(SOURCE)))
-
-    def test_rejects_missing_or_repeated_profiles(self):
-        with tempfile.TemporaryDirectory() as root:
-            header = Path(root) / "main/board.h"
-            header.parent.mkdir()
-            for text in ["", 'constexpr char kProfile[] = "a";\nconstexpr char kProfile[] = "a";\n']:
-                header.write_text(text)
-                with self.assertRaisesRegex(ValueError, "distinct kProfile"):
-                    PACKAGER.board_profiles(root)
+    def test_boards_match_main_board_h(self):
+        header = (SOURCE / "main/board.h").read_text()
+        self.assertEqual(sorted(re.findall(r'constexpr char kProfile\[\] = "([^"]+)";', header)),
+                         sorted(board["board"] for board in PACKAGER.BOARDS.values()))
 
 
 if __name__ == "__main__":

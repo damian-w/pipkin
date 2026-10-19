@@ -14,36 +14,23 @@ board with a USB data cable, then run:
 pipkin flash
 ```
 
-The CLI downloads the latest published stable firmware and the pinned Espressif
-flashing tool, checks the connected board and current firmware, and shows the plan
-before asking for yes/no confirmation. Enter means no. You do not need Python or
-ESP-IDF for this route. The same command updates an existing Pipkin; `pipkin update`
-updates the CLI itself. The firmware and CLI share a major version, which is the
-protocol version they speak, so CLI 2.x installs and talks to firmware 2.x.
-
-Pipkin supports two boards, described in [board profiles](#board-profiles): the
-**2.8-inch ESP32 CYD** with 4 MB flash, and the **4-inch LCDWIKI ES3C40P**
-(ESP32-S3, 16 MB flash). A running Pipkin reports its board; otherwise USB checks
-tell the boards apart by their ESP chip and flash, but can't see the attached screen
-or touch hardware, so a board with unknown or other firmware needs your confirmation
-that it is the intended board. With both connected, `pipkin flash` asks which one to
-flash. Installing Pipkin replaces that firmware and its saved application settings. Pipkin updates keep the selected display
-page, and an incompatible existing partition layout is rejected before writing.
-
-Firmware releases are created as drafts so they can be checked on hardware before
-publishing; the CLI uses only published stable releases. Firmware has a single
-application slot and no automatic rollback; rerun `pipkin flash` after an
-interrupted write. See the
+The CLI installs the latest published stable firmware for the connected board after
+showing its plan and asking for confirmation; the same command updates an existing
+Pipkin, and `pipkin update` updates the CLI itself. The firmware and CLI share a major
+version, which is the protocol version they speak, so CLI 2.x installs and talks to
+firmware 2.x. Both supported boards are described under [board profiles](#board-profiles).
+Firmware has a single application slot and no automatic rollback; rerun `pipkin flash`
+after an interrupted write. See the
 [CLI firmware guide](https://github.com/damian-w/pipkin-cli/blob/main/docs/firmware.md)
-for selecting a port or version, reinstalling and USB recovery.
+for board detection, selecting a port or version, reinstalling and USB recovery.
 
 ### Build firmware from source
 
 Pipkin builds with ESP-IDF **v5.4.2** (commit
 `f5c3654a1c2d2a01f7f67def7a0dc48e691f63c0`). Follow
 [Espressif's setup guide](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32/get-started/index.html),
-install the `esp32` and `esp32s3` tools, activate the SDK environment, then from the
-repository root. The ESP-IDF target selects the board. For the 2.8-inch CYD:
+install the `esp32` and `esp32s3` tools, activate the SDK environment, then run these
+from the repository root; the ESP-IDF target selects the board. For the 2.8-inch CYD:
 
 ```sh
 idf.py set-target esp32
@@ -67,8 +54,7 @@ to keep build-machine paths out of the binary.
 
 If the Pipkin helper is running, use `pipkin stop` before `idf.py -p PORT flash`
 so it releases the serial port, then `pipkin start` afterward. If it was already
-stopped, leave it stopped. This source-build route remains available for modified
-firmware and development.
+stopped, leave it stopped.
 
 ## Tests
 
@@ -127,6 +113,14 @@ work. Other screen hardware needs its own profile.
 
 ## Display
 
+What the screen shows, and how it responds to touch, host reports and task records,
+is specified in the protocol reference under
+[host status](protocol.md#host-and-application-status),
+[allowance groups](protocol.md#allowance-groups),
+[local tasks](protocol.md#local-tasks) and
+[display behaviour](protocol.md#display-behaviour); this section covers how the
+firmware draws it and drives the backlight.
+
 The layout is designed for 320 × 240. The 4-inch build (`PIPKIN_DISPLAY_480X320`)
 draws the same layout 4/3 larger, so text and gauges are larger on its screen, and
 the extra width goes to the columns: the layout is 360 × 240 there, and touch
@@ -140,18 +134,6 @@ re-evaluated once a second; unchanged frames send nothing. Page changes grow the
 gauges from empty over 650 ms, and a changed reading eases from the value on screen
 over the same time. The selected page is saved to flash only when it changes.
 
-Small dots beside each provider name show its observed local tasks: blue for
-working, amber for needing attention and red for blocked, with counts once there
-are more than six. Overview has no clock, so its cards start at the top of the
-screen; the time remains on the status page and sleep screen. Task counts come
-from the helper as they change, and at least every 15 seconds. They disappear
-after `kTaskFreshMs` (45 seconds) without a fresh observation, or when the
-computer sleeps or disconnects.
-
-Before Claude's first message, a confirmed idle session shows "Not started" and
-"Starts on first message" with a neutral gauge; weekly allowance stays visible.
-The CLI confirms this only for zero utilization and an explicit null reset.
-
 At power-on, Pip rides the loading bar for a 1.4-second intro. The bar waits for
 the first reading, adds setup guidance after eight seconds, and shows a QR code
 for `https://pipkin.io/start` after eighteen seconds without the helper. On the
@@ -163,26 +145,14 @@ The CLI observes system sleep/resume and shutdown on macOS, Windows and Linux
 sleep during a background system wake. Startup runs at sign-in; pre-login boot
 waking is not provided by the current user services.
 
-If host heartbeats stop, the screen turns off after 90 seconds, even before any
-usage has arrived. This does not change the host's diagnostic power state. Explicit
-disconnect also turns it off. An explicit wake or heartbeat recovery lights the
-screen for a minute while fresh usage loads; regular heartbeats do not extend this
-grace. While connected, stale readings dim to 20% after five stale minutes (ten
-minutes without a fresh observation), then turn off after fifteen stale minutes.
-Touch wakes a screen darkened by stale readings or missing helper traffic for a
-minute without activating a page control; explicit host sleep ignores touch.
-Once the backlight is off, the panel stops showing its frame until it wakes, so a
+While connected, stale readings dim to 20% after five stale minutes (ten minutes
+without a fresh observation), then turn off after fifteen stale minutes. Once the
+backlight is off, the panel stops showing its frame until it wakes, so a
 still image such as the setup QR code can't leave a faint ghost on the LCD.
 Serial reception remains active while dark, so a host report can wake the display
 without resetting the ESP32. Tune `kHostPresenceMs`, `kHostWakeMs`,
-`kDimAfterStaleMs`, `kOffAfterStaleMs` and `kTouchWakeMs` in `include/pipkin/model.h`.
-
-Hold anywhere on the screen for three seconds to open the About/status screen,
-which shows the firmware version, source revision, the connection to your computer
-and how recent each reading is. The hold allows small finger movements and brief
-touch dropouts. It opens while your finger is down and stays open when you release.
-A later tap or swipe closes it; it also closes itself after a minute untouched.
-For more detail, run `pipkin status` on the computer.
+`kDimAfterStaleMs`, `kOffAfterStaleMs`, `kTouchWakeMs` and `kTaskFreshMs` in
+`include/pipkin/model.h`.
 
 ## Serial connection
 
@@ -195,8 +165,7 @@ clock state; this never resets or flashes the device.
 Many CYD boards have an automatic reset circuit that restarts the ESP32 if DTR and RTS
 change independently when a port is opened. The ESP32-S3's USB port restarts it when
 RTS is set while DTR is clear. The Pipkin CLI keeps the port open to avoid repeated
-restarts, and resends everything if it detects one. This behaviour still needs
-testing on production boards.
+restarts, and resends everything if it detects one.
 
 ## Remaining hardware work
 

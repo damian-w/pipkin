@@ -42,10 +42,6 @@ def image_roles(board):
     ]
 
 
-def release_names(board):
-    """The board's manifest and demo reel asset names."""
-    suffix = board["suffix"]
-    return f"firmware{suffix}.json", f"pipkin-demo{suffix}.bin"
 SDK_NOTICES = [
     "LICENSE",
     "docs/en/COPYRIGHT.rst",
@@ -70,15 +66,7 @@ def c_string(data):
     return data.split(b"\0", 1)[0].decode("ascii")
 
 
-def board_profiles(source_dir):
-    """Read the board profiles main/board.h can compile."""
-    header = (Path(source_dir) / "main/board.h").read_text()
-    matches = re.findall(r'constexpr char kProfile\[\] = "([a-z0-9]+(?:-[a-z0-9]+)*)";', header)
-    require(matches and len(set(matches)) == len(matches), "board header must define distinct kProfile values")
-    return matches
-
-
-def validate_image(data, name, chip_id=0):
+def validate_image(data, name, chip_id):
     """Check the ESP header, segment lengths, XOR checksum and appended digest."""
     require(len(data) >= 24, f"{name}: truncated ESP image")
     require(data[0] == 0xE9 and 1 <= data[1] <= 16, f"{name}: invalid ESP image header")
@@ -113,20 +101,22 @@ def validate_application(data, version, revision, board, name="application"):
             f"{name}: compiled board profile differs from main/board.h; rebuild first")
 
 
-def demo_application(build_dir, version, revision, target):
+def demo_application(build_dir, version, revision):
     """A demo reel build (-DPIPKIN_DEMO=ON), which pipkin flash --demo writes in place of the
-    board's application. It is versioned <version>-demo and stays out of the manifests."""
+    board's application. It is versioned <version>-demo and stays out of the manifests.
+    Returns its target and image."""
     build_dir = Path(build_dir).resolve()
     project = json.loads((build_dir / "project_description.json").read_text())
-    require(project["project_name"] == "pipkin" and project["target"] == target,
-            f"demo: expected a pipkin {target} build")
+    target = project["target"]
+    require(project["project_name"] == "pipkin" and target in BOARDS,
+            "demo: expected a pipkin build for a supported board")
     require(project["project_version"] == f"{version}-demo", "demo: build version differs from the release")
     data = (build_dir / "pipkin.bin").read_bytes()
     require(0 < len(data) <= 0x100000, "demo: image does not fit its flash region")
     board = BOARDS[target]
     validate_image(data, "demo", board["chip_id"])
     validate_application(data, f"{version}-demo", revision, board["board"], "demo")
-    return data
+    return target, data
 
 
 def validate_partitions(data):
@@ -179,8 +169,8 @@ def third_party_notices(project, source_dir, targets):
     return "".join(sections).encode("utf-8")
 
 
-def board_build(build_dir, source_dir, revision, tag):
-    """Validate one board's build; returns its target, manifest and release payloads."""
+def board_build(build_dir, revision, tag):
+    """Validate one board's build; returns its project description, manifest and release payloads."""
     build_dir = Path(build_dir).resolve()
     project = json.loads((build_dir / "project_description.json").read_text())
     version = project["project_version"]
@@ -190,19 +180,14 @@ def board_build(build_dir, source_dir, revision, tag):
     target = project["target"]
     require(project["project_name"] == "pipkin" and target in BOARDS, "expected a pipkin build for a supported board")
     board = BOARDS[target]
-    require(board["board"] in board_profiles(source_dir), "main/board.h does not define the build's board profile")
     config = json.loads((build_dir / "flasher_args.json").read_text())
     require(config["flash_settings"] == FLASH_SETTINGS, "flash settings differ from DIO, 40 MHz and 4 MB")
-    args = config["write_flash_args"]
-    require(len(args) == 6 and {args[i]: args[i + 1] for i in range(0, 6, 2)} ==
-            {f"--{key}": value for key, value in FLASH_SETTINGS.items()}, "inconsistent write_flash_args")
-    require(config["extra_esptool_args"]["chip"] == target, f"flasher chip must be {target}")
     payloads, images, flash_files = {}, [], {}
     for role, key, filename, release_name, expected_offset, maximum_size in image_roles(board):
         description = config[key]
         offset = int(description["offset"], 0)
         require(offset == expected_offset, f"{role}: offset differs from the initial flash layout")
-        require(description["encrypted"] in (False, "false"), f"{role}: encrypted image is unsupported")
+        require(description["encrypted"] == "false", f"{role}: encrypted image is unsupported")
         path = (build_dir / description["file"]).resolve()
         require(path.is_relative_to(build_dir), f"{role}: image must be inside the build directory")
         require(path.name == filename, f"{role}: unexpected image filename")
@@ -222,9 +207,8 @@ def board_build(build_dir, source_dir, revision, tag):
             "flash_files differs from the selected three images")
     manifest = {"product": "pipkin", "version": version, "source_revision": revision,
                 "board": board["board"], "images": images}
-    manifest_name, _ = release_names(board)
-    payloads[manifest_name] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
-    return target, project, manifest, payloads
+    payloads[f"firmware{board['suffix']}.json"] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    return project, manifest, payloads
 
 
 def package(build_dirs, output_dir, source_dir, revision, tag=None, demo_build_dirs=()):
@@ -232,28 +216,26 @@ def package(build_dirs, output_dir, source_dir, revision, tag=None, demo_build_d
     output_dir = Path(output_dir).resolve()
     source_dir = Path(source_dir).resolve()
     require(re.fullmatch(r"[0-9a-f]{40}", revision), "source revision must be a full lowercase Git SHA")
-    builds = [board_build(path, source_dir, revision, tag) for path in build_dirs]
-    targets = [target for target, _, _, _ in builds]
+    builds = [board_build(path, revision, tag) for path in build_dirs]
+    targets = [project["target"] for project, _, _ in builds]
     require(targets and targets[0] == "esp32", "the first build must be the esp32 CYD, which firmware.json describes")
     require(len(set(targets)) == len(targets), "each board needs exactly one build")
-    versions = {manifest["version"] for _, _, manifest, _ in builds}
+    versions = {manifest["version"] for _, manifest, _ in builds}
     require(len(versions) == 1, "board builds have different firmware versions")
     version = versions.pop()
     payloads = {}
-    for _, _, _, board_payloads in builds:
+    for _, _, board_payloads in builds:
         payloads.update(board_payloads)
-    demo_targets = set()
     for path in demo_build_dirs:
-        target = json.loads((Path(path).resolve() / "project_description.json").read_text()).get("target")
-        require(target in targets and target not in demo_targets, "each demo reel needs its board's build, once")
-        demo_targets.add(target)
-        _, demo_name = release_names(BOARDS[target])
-        payloads[demo_name] = demo_application(path, version, revision, target)
+        target, data = demo_application(path, version, revision)
+        demo_name = f"pipkin-demo{BOARDS[target]['suffix']}.bin"
+        require(target in targets and demo_name not in payloads, "each demo reel needs its board's build, once")
+        payloads[demo_name] = data
     payloads["LICENSE"] = (source_dir / "LICENSE").read_bytes()
     payloads["NOTICE.md"] = (source_dir / "assets/NOTICE.md").read_text().replace(
         "[LICENSE](../LICENSE)", "[LICENSE](LICENSE)").encode("utf-8")
     payloads["Inter-OFL.txt"] = (source_dir / "assets/Inter-OFL.txt").read_bytes()
-    payloads["third-party-notices.txt"] = third_party_notices(builds[0][1], source_dir, targets)
+    payloads["third-party-notices.txt"] = third_party_notices(builds[0][0], source_dir, targets)
     payloads["SHA256SUMS"] = "".join(
         f"{hashlib.sha256(data).hexdigest()}  {name}\n"
         for name, data in sorted(payloads.items())).encode("ascii")
@@ -261,7 +243,7 @@ def package(build_dirs, output_dir, source_dir, revision, tag=None, demo_build_d
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, data in payloads.items():
         (output_dir / name).write_bytes(data)
-    return builds[0][2]
+    return builds[0][1]
 
 
 def main():

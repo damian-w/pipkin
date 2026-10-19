@@ -53,13 +53,10 @@ int layout(int v) {
                                                 : static_cast<int>(std::floor(v / kScale + 0.5f));
 }
 
+// Callers rule out the sleep screen and About first.
 bool revealing(const State& state, uint64_t now) {
-    return state.overlay == Overlay::None && !state.about_open && state.view_revision > 0 &&
-           now >= state.page_entered_ms && now - state.page_entered_ms < kTransitionMs;
-}
-
-double reveal(const State& state, uint64_t now) {
-    return revealing(state, now) ? transition(state.page_entered_ms, now) : 1;
+    return state.view_revision > 0 && now >= state.page_entered_ms &&
+           now - state.page_entered_ms < kTransitionMs;
 }
 
 unsigned remaining(const Window& window, uint64_t now, double progress) {
@@ -361,20 +358,15 @@ const char* session_note(const ProviderData& p) {
     }
 }
 
+// Callers check metered() first.
 void percentage(const Window& window, uint64_t now, double progress, char* out,
                 std::size_t length) {
-    if (metered(window))
-        std::snprintf(out, length, "%u%%", (remaining(window, now, progress) + 5) / 10);
-    else
-        std::snprintf(out, length, "--");
+    std::snprintf(out, length, "%u%%", (remaining(window, now, progress) + 5) / 10);
 }
 
+// For windows that are not metered; a no-cap session is never drawn.
 const char* state_label(const Window& window) {
     switch (window.state) {
-    case AllowanceState::Metered:
-        return "remaining";
-    case AllowanceState::NoCap:
-        return "No cap";
     case AllowanceState::NotStarted:
         return "Not started";
     case AllowanceState::Unsupported:
@@ -388,17 +380,13 @@ const char* state_label(const Window& window) {
 void window_label(const Window& w, bool weekly, char* out, std::size_t length) {
     const char* name = weekly ? "Weekly" : "Session";
     const uint32_t usual = weekly ? 7 * 86400 : 5 * 3600;
-    if (!w.duration_seconds || *w.duration_seconds == usual) {
+    const uint32_t seconds = w.duration_seconds.value_or(usual);
+    if (seconds == usual || seconds % 3600 != 0)
         std::snprintf(out, length, "%s", name);
-        return;
-    }
-    const auto seconds = *w.duration_seconds;
-    if (seconds % 86400 == 0)
+    else if (seconds % 86400 == 0)
         std::snprintf(out, length, "%s / %ud", name, static_cast<unsigned>(seconds / 86400));
-    else if (seconds % 3600 == 0)
-        std::snprintf(out, length, "%s / %uh", name, static_cast<unsigned>(seconds / 3600));
     else
-        std::snprintf(out, length, "%s", name);
+        std::snprintf(out, length, "%s / %uh", name, static_cast<unsigned>(seconds / 3600));
 }
 
 void countdown(const State& state, const Window& w, uint64_t now, char* out, std::size_t length) {
@@ -463,11 +451,7 @@ const char* freshness(const ProviderData& p, uint64_t now) {
 }
 
 const char* connection(const State& state) {
-    if (state.host == HostState::Disconnected)
-        return "Disconnected";
-    if (!state.transport_connected)
-        return "Not connected";
-    return nullptr;
+    return state.host == HostState::Disconnected ? "Disconnected" : nullptr;
 }
 
 int pill(Canvas& c, int x, int middle, const char* s, uint16_t color) {
@@ -500,7 +484,7 @@ void clock_text(Canvas& c, const State& state, uint64_t now, bool centred) {
     const int colon = panel(4);
     const int span = digit * 4 + colon;
     int x = centred ? (kDisplayWidth - span) / 2 : panel(kRight) - span;
-    const int dot = std::max(panel(1), 1);
+    const int dot = panel(1);
     for (int i = 0; i < 5; ++i) {
         const int width = i == 2 ? colon : digit;
         const char text[] = {value[i], 0};
@@ -528,7 +512,8 @@ void page_indicator(Canvas& c, const State& state) {
 
 void bar(Canvas& c, int x, int y, int width, const Window& w, uint64_t now, double progress) {
     c.round_rect(x, y, width, 4, 2, track);
-    const int filled = width * static_cast<int>(remaining(w, now, progress)) / 1000;
+    const int filled =
+        metered(w) ? width * static_cast<int>(remaining(w, now, progress)) / 1000 : 0;
     if (filled > 0)
         c.round_rect(x, y, std::max(filled, 4), 4, 2, tone(w));
 }
@@ -538,8 +523,8 @@ constexpr int kTaskGap = 3;
 constexpr int kTaskCountGap = 6;
 constexpr int kTaskDotLimit = 6;
 
-// One dot per observed working, attention or blocked task, drawn leftward from right in that
-// order; past kTaskDotLimit each status shows one dot and its count. Returns the width used.
+// One dot per observed task, drawn leftward from right as blocked, attention, then working;
+// past kTaskDotLimit each status shows one dot and its count. Returns the width used.
 int task_dots(Canvas& c, const State& state, int index, int right, int middle, uint64_t now) {
     const auto& tasks = state.tasks[index];
     if (!tasks_current(tasks, now))
@@ -598,11 +583,9 @@ void overview_window(Canvas& c, const State& state, int x, int y, int width, con
         c.text(x, baseline - (expanded ? 35 : 24), value, number, figure(w));
         c.text(x + c.width(value, number) + 5, baseline - 10, "remaining", font::size10,
                secondary);
-        bar(c, x, baseline + (expanded ? 33 : 7), width, w, now, progress);
-    } else {
+    } else
         c.text(x, baseline - 11, state_label(w), font::size11, foreground);
-        c.round_rect(x, baseline + (expanded ? 33 : 7), width, 4, 2, track);
-    }
+    bar(c, x, baseline + (expanded ? 33 : 7), width, w, now, progress);
     if (expanded && w.state != AllowanceState::NotStarted)
         c.text(x, baseline + 10, reset, font::size11, reset_color);
     else if (width > 200 && w.state == AllowanceState::Metered)
@@ -686,10 +669,6 @@ void short_age(uint64_t milliseconds, char* out, std::size_t length) {
         std::snprintf(out, length, "%lluh", static_cast<unsigned long long>(seconds / 3600));
 }
 
-void status_dot(Canvas& c, int x, int middle, uint16_t color) {
-    c.round_rect(x, middle - 3, 7, 7, 3.5f, color);
-}
-
 // Keep observation age distinct from receipt age when the source time is unknown.
 void provider_status(Canvas& c, const ProviderData& p, int index, int y, uint64_t now) {
     provider_title(c, index, y);
@@ -747,11 +726,10 @@ void about(Canvas& c, const State& state, uint64_t now) {
     const char* host = state.host == HostState::Disconnected ? "Computer disconnected"
                        : !state.transport_connected            ? "Not connected"
                        : alive                                 ? "Connected"
-                       : state.host == HostState::Asleep       ? "Computer asleep"
                                                                : "Connected, not confirmed";
     const auto dot = !linked(state) ? depleted : alive ? accent : caution;
     c.rect(16, 38, kContentWidth, 1, track);
-    status_dot(c, 16, 59, dot);
+    c.round_rect(16, 56, 7, 7, 3.5f, dot);
     c.text(31, 52, host, font::size12, foreground);
     c.rect(16, 80, kContentWidth, 1, track);
     provider_status(c, state.providers[0], 0, 96, now);
@@ -919,10 +897,9 @@ void boot(Canvas& c, const State& state, uint64_t now) {
 
     const Key track_in[] = {{480, 0}, {800, 1}};
     const float bar_opacity = keyed(t, track_in) * out;
-    c.round_rect(static_cast<int>(kBarLeft), static_cast<int>(kBarTop), static_cast<int>(kBarWidth),
-                 static_cast<int>(kBarHeight), kBarHeight / 2, fade(track, bar_opacity));
-    c.round_rect(static_cast<int>(kBarLeft), static_cast<int>(kBarTop),
-                 static_cast<int>(width + 0.5f), static_cast<int>(kBarHeight), kBarHeight / 2,
+    c.round_rect(kBarLeft, kBarTop, kBarWidth, kBarHeight, kBarHeight / 2,
+                 fade(track, bar_opacity));
+    c.round_rect(kBarLeft, kBarTop, static_cast<int>(width + 0.5f), kBarHeight, kBarHeight / 2,
                  fade(accent, bar_opacity));
 
     float left_hand = 0, right_hand = 0;
@@ -966,7 +943,7 @@ bool boot_moving(const Boot& b, uint64_t now) {
 } // namespace
 
 bool animation_active(const State& state, uint64_t now_ms) {
-    if (state.overlay != Overlay::None || state.about_open)
+    if (state.host == HostState::Asleep || state.about_open)
         return false;
     if (state.boot.active)
         return boot_moving(state.boot, now_ms);
@@ -983,7 +960,7 @@ void render(const State& state, uint64_t now_ms, uint16_t* pixels, int first_row
         return;
     Canvas c{pixels, first_row, first_row + rows};
     c.fill(0, 0, kDisplayWidth, kDisplayHeight, background);
-    if (state.overlay == Overlay::Sleep) {
+    if (state.host == HostState::Asleep) {
         clock_text(c, state, now_ms, true);
         c.centered(kCentre, 104, "Computer asleep", font::size14, foreground);
         c.centered(kCentre, 128, "Pipkin wakes with it", font::size11, secondary);
@@ -1000,7 +977,7 @@ void render(const State& state, uint64_t now_ms, uint16_t* pixels, int first_row
     }
     const bool codex = provider_visible(state, Provider::Codex);
     const bool claude = provider_visible(state, Provider::Claude);
-    const auto progress = reveal(state, now_ms);
+    const auto progress = revealing(state, now_ms) ? transition(state.page_entered_ms, now_ms) : 1;
     const bool overview = effective_page(state) == Page::Overview;
     if (!codex && !claude) {
         c.centered(kCentre, 100, linked(state) ? "Waiting for usage" : "Waiting for your computer",

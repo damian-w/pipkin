@@ -40,7 +40,8 @@ resetting the device or requiring a sequence:
 v=2 kind=identify
 ```
 
-The response carries the firmware version, the compiled board profile, the last
+The response carries the firmware version, the compiled board profile
+(`esp32-2432s028r` for the 2.8-inch CYD, `es3c40p` for the 4-inch ES3C40P), the last
 accepted `seq`, the current `clock_epoch`, and the device's current `unix` time,
 or `null` before clock synchronization:
 

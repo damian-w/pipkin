@@ -17,9 +17,10 @@ SPEC.loader.exec_module(PACKAGER)
 REVISION = "0123456789abcdef0123456789abcdef01234567"
 
 
-def esp_image(payload):
+def esp_image(payload, chip_id=0):
     header = bytearray(24)
     header[:4] = b"\xe9\x01\x02\x20"
+    struct.pack_into("<H", header, 12, chip_id)
     header[23] = 1
     data = bytes(header) + struct.pack("<II", 0x3F400020, len(payload)) + payload
     checksum = 0xEF
@@ -29,13 +30,13 @@ def esp_image(payload):
     return data + hashlib.sha256(data).digest()
 
 
-def application(version="1.0.0", revision=REVISION, board="esp32-2432s028r"):
+def application(version="1.0.0", revision=REVISION, board="esp32-2432s028r", chip_id=0):
     description = bytearray(256)
     struct.pack_into("<I", description, 0, 0xABCD5432)
     description[16:48] = version.encode().ljust(32, b"\0")
     description[48:80] = b"pipkin".ljust(32, b"\0")
     description[112:144] = b"v5.4.2".ljust(32, b"\0")
-    return esp_image(bytes(description) + revision[:12].encode() + b"\0" + board.encode() + b"\0")
+    return esp_image(bytes(description) + revision[:12].encode() + b"\0" + board.encode() + b"\0", chip_id)
 
 
 def partition_table(nvs_offset=0x9000, flags=0):
@@ -70,9 +71,10 @@ class PackagingTest(unittest.TestCase):
                 path = base / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(f"Copyright fixture: {name}\n")
-        xtensa = sdk / "components/xtensa/esp32/include/xtensa/config/core-isa.h"
-        xtensa.parent.mkdir(parents=True)
-        xtensa.write_text("/* Header description */\n/* Copyright fixture\nPermission is hereby granted */\n")
+        for target in ["esp32", "esp32s3"]:
+            xtensa = sdk / f"components/xtensa/{target}/include/xtensa/config/core-isa.h"
+            xtensa.parent.mkdir(parents=True)
+            xtensa.write_text(f"/* Header description */\n/* Copyright {target} fixture\nPermission is hereby granted */\n")
         self.project = {
             "project_name": "pipkin", "project_version": "1.0.0", "target": "esp32",
             "idf_path": str(sdk), "c_compiler": str(self.root / "toolchain/bin/xtensa-esp32-elf-gcc"),
@@ -88,13 +90,31 @@ class PackagingTest(unittest.TestCase):
             "app": {"file": "pipkin.bin", "offset": "0x10000", "encrypted": "false"},
         }
 
-    def package(self, tag="v1.0.0", demo=None):
+    def package(self, tag="v1.0.0", demo=None, builds=None):
         (self.build / "project_description.json").write_text(json.dumps(self.project))
         (self.build / "flasher_args.json").write_text(json.dumps(self.config))
-        return PACKAGER.package(self.build, self.output, SOURCE, REVISION, tag, demo)
+        return PACKAGER.package(builds or [self.build], self.output, SOURCE, REVISION, tag, demo or [])
+
+    def large_build(self, version="1.0.0", name="build-es3c40p"):
+        """An ESP32-S3 build for the 4-inch ES3C40P."""
+        build = self.root / name
+        (build / "bootloader").mkdir(parents=True)
+        (build / "partition_table").mkdir()
+        (build / "bootloader/bootloader.bin").write_bytes(esp_image(b"bootloader", 9))
+        (build / "partition_table/partition-table.bin").write_bytes(partition_table())
+        (build / "pipkin.bin").write_bytes(application(version=version, board="es3c40p", chip_id=9))
+        (build / "project_description.json").write_text(
+            json.dumps({**self.project, "target": "esp32s3", "project_version": version}))
+        config = json.loads(json.dumps(self.config))
+        config["extra_esptool_args"]["chip"] = "esp32s3"
+        config["flash_files"] = {"0x0": "bootloader/bootloader.bin", "0x8000": "partition_table/partition-table.bin",
+                                 "0x10000": "pipkin.bin"}
+        config["bootloader"]["offset"] = "0x0"
+        (build / "flasher_args.json").write_text(json.dumps(config))
+        return build
 
     def demo_build(self, version="1.0.0-demo", app_version=None):
-        self.package(demo=None)
+        self.package()
         shutil.rmtree(self.output)
         demo = self.root / "build-demo"
         shutil.copytree(self.build, demo)
@@ -125,7 +145,8 @@ class PackagingTest(unittest.TestCase):
             self.assertEqual(digest, hashlib.sha256((self.output / name).read_bytes()).hexdigest())
         notices = (self.output / "third-party-notices.txt").read_text()
         self.assertIn("gcc/COPYING.RUNTIME", notices)
-        self.assertIn("Copyright fixture\nPermission is hereby granted", notices)
+        self.assertIn("Copyright esp32 fixture\nPermission is hereby granted", notices)
+        self.assertNotIn("esp32s3", notices)
         self.assertNotIn(str(self.root), (self.output / "firmware.json").read_text() + notices)
         for image in manifest["images"]:
             data = (self.output / image["file"]).read_bytes()
@@ -134,7 +155,7 @@ class PackagingTest(unittest.TestCase):
 
     def test_demo_reel_is_an_extra_checked_asset(self):
         demo = self.demo_build()
-        manifest = self.package(demo=demo)
+        manifest = self.package(demo=[demo])
         self.assertEqual([image["file"] for image in manifest["images"]],
                          ["bootloader.bin", "partition-table.bin", "pipkin.bin"])
         self.assertEqual((self.output / "pipkin-demo.bin").read_bytes(), (demo / "pipkin.bin").read_bytes())
@@ -147,12 +168,12 @@ class PackagingTest(unittest.TestCase):
             with self.subTest(version=version):
                 demo = self.demo_build(version=version)
                 with self.assertRaisesRegex(ValueError, "demo: build version"):
-                    self.package(demo=demo)
+                    self.package(demo=[demo])
                 self.assertFalse(self.output.exists())
                 shutil.rmtree(demo)
         demo = self.demo_build(app_version="1.0.0")
         with self.assertRaisesRegex(ValueError, "demo: firmware version"):
-            self.package(demo=demo)
+            self.package(demo=[demo])
 
     def test_rejects_wrong_tag(self):
         self.rejected("release tag", "v1.0.1")
@@ -220,6 +241,54 @@ class PackagingTest(unittest.TestCase):
         self.config["app"]["file"] = "../pipkin.bin"
         self.rejected("inside the build directory")
 
+    def test_4_inch_board_adds_its_own_manifest_and_images(self):
+        large = self.large_build()
+        demo = self.demo_build()
+        large_demo = self.large_build(version="1.0.0-demo", name="build-es3c40p-demo")
+        manifest = self.package(builds=[self.build, large], demo=[demo, large_demo])
+        self.assertEqual(manifest["board"], "esp32-2432s028r")
+        self.assertEqual({path.name for path in self.output.iterdir()}, {
+            "bootloader.bin", "partition-table.bin", "pipkin.bin", "firmware.json", "pipkin-demo.bin",
+            "bootloader-es3c40p.bin", "partition-table-es3c40p.bin", "pipkin-es3c40p.bin",
+            "firmware-es3c40p.json", "pipkin-demo-es3c40p.bin",
+            "SHA256SUMS", "LICENSE", "NOTICE.md", "Inter-OFL.txt", "third-party-notices.txt",
+        })
+        # CLIs before the 4-inch board read firmware.json, which still describes only the CYD.
+        self.assertNotIn("es3c40p", (self.output / "firmware.json").read_text())
+        large_manifest = json.loads((self.output / "firmware-es3c40p.json").read_text())
+        self.assertEqual(large_manifest["board"], "es3c40p")
+        self.assertEqual([(image["role"], image["file"], image["offset"]) for image in large_manifest["images"]], [
+            ("bootloader", "bootloader-es3c40p.bin", 0x0),
+            ("partition-table", "partition-table-es3c40p.bin", 0x8000),
+            ("application", "pipkin-es3c40p.bin", 0x10000),
+        ])
+        self.assertEqual((self.output / "pipkin-demo-es3c40p.bin").read_bytes(),
+                         (large_demo / "pipkin.bin").read_bytes())
+        notices = (self.output / "third-party-notices.txt").read_text()
+        self.assertIn("Copyright esp32 fixture", notices)
+        self.assertIn("Copyright esp32s3 fixture", notices)
+        for line in (self.output / "SHA256SUMS").read_text().splitlines():
+            digest, name = line.split("  ")
+            self.assertEqual(digest, hashlib.sha256((self.output / name).read_bytes()).hexdigest())
+
+    def test_rejects_a_release_without_the_cyd_first_or_with_mismatched_boards(self):
+        large = self.large_build()
+        with self.assertRaisesRegex(ValueError, "first build must be the esp32 CYD"):
+            self.package(builds=[large])
+        with self.assertRaisesRegex(ValueError, "exactly one build"):
+            self.package(builds=[self.build, large, large])
+        with self.assertRaisesRegex(ValueError, "release tag"):
+            self.package(builds=[self.build, self.large_build(version="1.0.1", name="build-other")])
+        (large / "pipkin.bin").write_bytes(application(board="es3c40p"))
+        with self.assertRaisesRegex(ValueError, "another chip"):
+            self.package(builds=[self.build, large])
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_a_demo_reel_without_its_board(self):
+        demo = self.large_build(version="1.0.0-demo", name="build-es3c40p-demo")
+        with self.assertRaisesRegex(ValueError, "demo reel needs its board"):
+            self.package(demo=[demo])
+
     def test_does_not_mix_stale_release_assets(self):
         self.output.mkdir()
         stale = self.output / "old.bin"
@@ -230,17 +299,19 @@ class PackagingTest(unittest.TestCase):
 
 
 class BoardProfileTest(unittest.TestCase):
-    def test_reads_the_compiled_board_profile(self):
-        self.assertEqual(PACKAGER.board_profile(SOURCE), "esp32-2432s028r")
+    def test_reads_the_board_profiles(self):
+        self.assertEqual(PACKAGER.board_profiles(SOURCE), ["es3c40p", "esp32-2432s028r"])
+        self.assertEqual({board["board"] for board in PACKAGER.BOARDS.values()},
+                         set(PACKAGER.board_profiles(SOURCE)))
 
-    def test_rejects_a_missing_or_ambiguous_profile(self):
+    def test_rejects_missing_or_repeated_profiles(self):
         with tempfile.TemporaryDirectory() as root:
             header = Path(root) / "main/board.h"
             header.parent.mkdir()
-            for text in ["", 'constexpr char kProfile[] = "a";\nconstexpr char kProfile[] = "b";\n']:
+            for text in ["", 'constexpr char kProfile[] = "a";\nconstexpr char kProfile[] = "a";\n']:
                 header.write_text(text)
-                with self.assertRaisesRegex(ValueError, "one kProfile"):
-                    PACKAGER.board_profile(root)
+                with self.assertRaisesRegex(ValueError, "distinct kProfile"):
+                    PACKAGER.board_profiles(root)
 
 
 if __name__ == "__main__":

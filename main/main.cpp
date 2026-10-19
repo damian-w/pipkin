@@ -1,17 +1,16 @@
 #include "board.h"
 #include "display.h"
 #include "line_reader.h"
+#include "link.h"
 #include "pipkin/demo.h"
 #include "pipkin/model.h"
 #include "pipkin/render.h"
 
-#include "driver/uart.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -69,9 +68,8 @@ void identity(const pipkin::State& state, uint64_t now) {
         " clock_epoch=%" PRIu64 " unix=%s\n",
         esp_app_get_description()->version, board::kProfile, state.last_sequence,
         state.clock.observation_epoch, unix_time);
-    if (count > 0 && count < static_cast<int>(sizeof(reply))) {
-        ESP_ERROR_CHECK(uart_write_bytes(UART_NUM_0, reply, count) == count ? ESP_OK : ESP_FAIL);
-    }
+    if (count > 0 && count < static_cast<int>(sizeof(reply)))
+        link_write(reply, count);
 }
 
 } // namespace
@@ -95,17 +93,7 @@ extern "C" void app_main() {
     }
     auto saved_page = state.page;
 
-    uart_config_t uart{};
-    uart.baud_rate = 115200;
-    uart.data_bits = UART_DATA_8_BITS;
-    uart.parity = UART_PARITY_DISABLE;
-    uart.stop_bits = UART_STOP_BITS_1;
-    uart.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
-    uart.source_clk = UART_SCLK_DEFAULT;
-    ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uart));
-    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, 1, 3, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    QueueHandle_t uart_events = nullptr;
-    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 2048, 0, 8, &uart_events, 0));
+    link_init();
 
     display_init();
     pipkin::start_boot(state, now_ms());
@@ -113,22 +101,18 @@ extern "C" void app_main() {
     uint64_t rendered_ms = 0;
     bool dirty = true;
     int backlight = 0;
+    bool panel_on = true;
     uint64_t faded_ms = now_ms();
 
     for (;;) {
         const uint64_t now = now_ms();
-        uart_event_t event{};
-        while (xQueueReceive(uart_events, &event, 0) == pdTRUE) {
-            if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL ||
-                event.type == UART_FRAME_ERR || event.type == UART_PARITY_ERR) {
-                ESP_ERROR_CHECK(uart_flush_input(UART_NUM_0));
-                reader.size = 0;
-                reader.overflow = true;
-            }
-        }
         char bytes[512];
-        const int count = uart_read_bytes(UART_NUM_0, bytes, sizeof(bytes), pdMS_TO_TICKS(20));
-        ESP_ERROR_CHECK(count >= 0 ? ESP_OK : ESP_FAIL);
+        bool lost = false;
+        const int count = link_read(bytes, sizeof(bytes), pdMS_TO_TICKS(20), lost);
+        if (lost) {
+            reader.size = 0;
+            reader.overflow = true;
+        }
         for (int i = 0; i < count; ++i) {
             reader.push(bytes[i], [&](std::string_view line) {
                 if (line == pipkin::kIdentifyRequest) {
@@ -161,6 +145,10 @@ extern "C" void app_main() {
 
         const int target = pipkin::backlight_level(state, now) * 10;
         const bool awake = target > 0;
+        if (awake && !panel_on) {
+            display_power(true);
+            panel_on = true;
+        }
         const bool frame_due =
             pipkin::animation_active(state, now)
                 ? now - rendered_ms >= 33
@@ -176,6 +164,11 @@ extern "C" void app_main() {
             backlight = target > backlight ? std::min(target, backlight + step)
                                            : std::max(target, backlight - step);
             display_backlight(backlight);
+        }
+        // Once the backlight is off, stop showing the frame until it wakes.
+        if (!awake && backlight == 0 && panel_on) {
+            display_power(false);
+            panel_on = false;
         }
         faded_ms = now;
     }

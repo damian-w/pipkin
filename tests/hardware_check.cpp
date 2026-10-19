@@ -31,10 +31,22 @@ int main() {
     reader.overflow = true;
     feed("discard after UART error\nvalid\n");
     assert(lines.back() == "valid" && lines.size() == accepted + 2);
+#if PIPKIN_BOARD_ES3C40P
+    // Portrait touch reports land on the landscape panel, clamped to it.
+    int x = -1;
+    int y = -1;
+    board::touch_to_panel(0, 0, x, y);
+    assert(x == 479 && y == 0);
+    board::touch_to_panel(319, 479, x, y);
+    assert(x == 0 && y == 319);
+    board::touch_to_panel(400, 600, x, y);
+    assert(x == 0 && y == 319);
+#else
     assert(board::touch_coordinate(200, 200, 3800, 320) == 0);
     assert(board::touch_coordinate(3800, 200, 3800, 320) == 319);
     assert(board::touch_coordinate(4095, 200, 3800, 320) == 319);
     assert(board::touch_coordinate(0, 200, 3800, 320) == 0);
     assert(board::touch_coordinate(200, 3800, 200, 240) == 239);
     assert(board::touch_coordinate(3800, 3800, 200, 240) == 0);
+#endif
 }

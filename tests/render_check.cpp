@@ -1,4 +1,5 @@
 #include "pipkin/render.h"
+#include "../src/setup_qr_data.h"
 
 #include <algorithm>
 #include <array>
@@ -7,8 +8,21 @@
 #include <functional>
 #include <vector>
 
+// Layout to panel pixels, as the renderer rounds them.
+int panel(int v) {
+    return (v * pipkin::kScaleNumerator * 2 + pipkin::kScaleDenominator) /
+           (2 * pipkin::kScaleDenominator);
+}
+// Index of the panel pixel at layout (x, y).
+int at(int x, int y) { return panel(y) * pipkin::kDisplayWidth + panel(x); }
+
 int main() {
     constexpr std::size_t count = pipkin::kDisplayWidth * pipkin::kDisplayHeight;
+    // Paired dial centres on provider pages.
+    constexpr int dial_offset = 76 * pipkin::kLayoutWidth / 320;
+    constexpr int dials[] = {pipkin::kLayoutWidth / 2 - dial_offset,
+                             pipkin::kLayoutWidth / 2 + dial_offset};
+    constexpr int right = pipkin::kLayoutWidth - 16;
     std::array<uint16_t, count + 2> guarded{};
     guarded.front() = guarded.back() = 0xbeef;
     pipkin::State state;
@@ -59,17 +73,18 @@ int main() {
     provider.banked_resets = 0;
     provider.session.used_tenths = provider.weekly.used_tenths = 1000;
     const auto empty = frame(state, 1000);
-    assert(full[78 * pipkin::kDisplayWidth + 84] != empty[78 * pipkin::kDisplayWidth + 84]);
+    assert(full[at(dials[0], 78)] != empty[at(dials[0], 78)]);
     provider.session.used_tenths = provider.weekly.used_tenths = 0;
     state.page_entered_ms = 1000;
     state.view_revision = 1;
     assert(pipkin::animation_active(state, 1000));
     const auto start = frame(state, 1000);
     for (int y = 60; y < 100; ++y)
-        for (int x : {30, 84, 138, 182, 236, 290}) {
-            const auto i = y * pipkin::kDisplayWidth + x;
-            assert(start[i] == empty[i]);
-        }
+        for (int dial : dials)
+            for (int x : {dial - 54, dial, dial + 54}) {
+                const auto i = at(x, y);
+                assert(start[i] == empty[i]);
+            }
     assert(start != empty);
     assert(frame(state, 1300) != empty && frame(state, 1300) != full);
     assert(!pipkin::animation_active(state, 1650));
@@ -89,9 +104,12 @@ int main() {
     assert(frame(state, 1000) != unlabelled);
     provider.session.duration_seconds.reset();
 
-    // Changed pixels inside and outside the rectangle from (left, top) to the right edge.
+    // Changed pixels inside and outside the layout rectangle from (left, top) to the right edge.
     auto changes = [](const std::vector<uint16_t>& a, const std::vector<uint16_t>& b, int top,
                       int bottom, int left) {
+        top = panel(top);
+        bottom = panel(bottom);
+        left = panel(left);
         std::array<int, 2> changed{};
         for (int y = 0; y < pipkin::kDisplayHeight; ++y)
             for (int x = 0; x < pipkin::kDisplayWidth; ++x) {
@@ -109,7 +127,7 @@ int main() {
     const auto overview = frame(state, 1000);
     assert(frame(state, 60000) == overview);
     state.about_open = true;
-    assert(changes(frame(state, 1000), frame(state, 60000), 0, 30, 250)[0] > 0);
+    assert(changes(frame(state, 1000), frame(state, 60000), 0, 30, right - 54)[0] > 0);
     state.about_open = false;
 
     // Task dots take the clock's corner on provider pages and join the overview heading.
@@ -120,11 +138,11 @@ int main() {
     assert(frame(state, 1000) == overview);
     tasks.working = 2;
     tasks.attention = 1;
-    const auto overview_dots = changes(overview, frame(state, 1000), 56, 72, 250);
+    const auto overview_dots = changes(overview, frame(state, 1000), 56, 72, right - 54);
     assert(overview_dots[0] > 0 && overview_dots[1] == 0);
     state.page = pipkin::Page::Codex;
     const auto dots = frame(state, 1000);
-    const auto corner = changes(full, dots, 0, 30, 250);
+    const auto corner = changes(full, dots, 0, 30, right - 54);
     assert(corner[0] > 0 && corner[1] == 0);
     assert(frame(state, pipkin::kTaskFreshMs - 1) == dots);
     assert(frame(state, pipkin::kTaskFreshMs) == full);
@@ -132,7 +150,7 @@ int main() {
     assert(frame(state, 1000) != dots);
     tasks.working = 8;
     const auto counted = frame(state, 1000);
-    const auto counted_corner = changes(full, counted, 0, 30, 250);
+    const auto counted_corner = changes(full, counted, 0, 30, right - 54);
     assert(counted != dots && counted_corner[0] > 0 && counted_corner[1] == 0);
     tasks.coverage = pipkin::TaskCoverage::Unavailable;
     assert(frame(state, 1000) == full);
@@ -155,13 +173,13 @@ int main() {
     state.providers[1].weekly.used_tenths = 870;
     for (auto page : {pipkin::Page::Overview, pipkin::Page::Codex, pipkin::Page::Claude}) {
         state.page = page;
-        for (int rows : {1, 7, 16, 240})
+        for (int rows : {1, 7, 16, pipkin::kDisplayHeight})
             assert(banded(state, 1000, rows) == frame(state, 1000));
     }
     state.tasks = {};
     state.providers[1] = {};
     state.page = pipkin::Page::Codex;
-    pipkin::render(state, 0, guarded.data() + 1, 200, 41);
+    pipkin::render(state, 0, guarded.data() + 1, pipkin::kDisplayHeight - 40, 41);
     assert(guarded.front() == 0xbeef && guarded.back() == 0xbeef);
 
     provider.session = {};
@@ -218,8 +236,9 @@ int main() {
             const auto not_started = frame(idle, 1000);
             if (page == pipkin::Page::Overview) {
                 const int top = paired ? 208 : 149;
-                for (int y = top; y < top + 12; ++y)
-                    for (int x = 16; x < 152; ++x)
+                const int column = (pipkin::kLayoutWidth - 48) / 2;
+                for (int y = panel(top); y < panel(top + 12); ++y)
+                    for (int x = panel(16); x < panel(16 + column); ++x)
                         assert(not_started[y * pipkin::kDisplayWidth + x] == not_started[0]);
             }
             session.state = pipkin::AllowanceState::Metered;
@@ -241,20 +260,20 @@ int main() {
     assert(!pipkin::animation_active(state, 5000) && frame(state, 5000) == frame(state, 6000));
     assert(pipkin::animation_active(state, 7200) && frame(state, 7200) != frame(state, 6000));
     assert(frame(state, 9000) != frame(state, 6000));
-    constexpr int qr_corner = 8 * pipkin::kDisplayWidth + 104;
+    const int qr_corner = at((pipkin::kLayoutWidth - (pipkin::setup_qr::kSize + 8) * 3) / 2, 8);
     assert(frame(state, 17999)[qr_corner] == blank[qr_corner]);
     assert(frame(state, 18000)[qr_corner] == 0xffff);
     for (uint64_t now : {17999, 18000, 24000}) {
         pipkin::render(state, now, guarded.data() + 1);
         assert(guarded.front() == 0xbeef && guarded.back() == 0xbeef);
-        for (int rows : {1, 7, 16, 240})
+        for (int rows : {1, 7, 16, pipkin::kDisplayHeight})
             assert(banded(state, now, rows) == frame(state, now));
     }
     state.transport_connected = true;
     assert(frame(state, 18000)[qr_corner] == blank[qr_corner]);
     assert(frame(state, 9000) != frame(state, 6000) && frame(state, 3000) != blank);
     for (uint64_t now : {0, 1000, 2000, 3000, 9000, 18000})
-        for (int rows : {1, 7, 16, 240})
+        for (int rows : {1, 7, 16, pipkin::kDisplayHeight})
             assert(banded(state, now, rows) == frame(state, now));
     state.transport_connected = false;
     state.boot.ready_ms = 18500;

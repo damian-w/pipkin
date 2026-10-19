@@ -6,7 +6,7 @@ The embedded font raster data is a subset of Inter, Copyright 2020 The Inter Pro
 
 Source: https://github.com/google/fonts/tree/0b58fb370093f9a9f4ff785d94405710b79de67c/ofl/inter
 
-Source TTF SHA-256: `29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031`. Rasterized with Pillow 12.3.0 at 10, 11, 12, 14, 24, 36 and 48 pixels, weight 500, optical size 14 for small text and 32 for numbers, plus the boot screen's "pipkin" wordmark at 30 pixels, weight 500, optical size 32; coverage quantized to four bits. Font data retains its own licence.
+Source TTF SHA-256: `29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031`. Rasterized with Pillow 12.3.0 at 10, 11, 12, 14, 24, 36 and 48 pixels for the 2.8-inch display and 13, 15, 16, 19, 32, 48 and 64 pixels for the 4-inch display, weight 500, optical size 14 for small text and 32 for numbers, plus the boot screen's "pipkin" wordmark at 30 and 40 pixels, weight 500, optical size 32; coverage quantized to four bits. Font data retains its own licence.
 
 ## Trademarks
 

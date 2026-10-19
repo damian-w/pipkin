@@ -17,6 +17,7 @@ if(NOT "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}" VERSION_
     message(FATAL_ERROR "Pipkin requires ESP-IDF v5.4.2")
 endif()
 
-if(NOT IDF_TARGET STREQUAL "esp32")
-    message(FATAL_ERROR "The selected board profile requires the esp32 target")
+# esp32 builds the 2.8-inch CYD (ESP32-2432S028R) and esp32s3 the 4-inch ES3C40P.
+if(NOT IDF_TARGET STREQUAL "esp32" AND NOT IDF_TARGET STREQUAL "esp32s3")
+    message(FATAL_ERROR "Pipkin boards use the esp32 or esp32s3 target")
 endif()

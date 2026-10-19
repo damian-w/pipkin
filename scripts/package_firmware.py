@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Package an ESP-IDF build for pipkin flash without filling the NVS gaps."""
+"""Package ESP-IDF builds for pipkin flash without filling the NVS gaps.
+
+Each build's target selects its board. The 2.8-inch CYD (esp32) keeps the original asset
+names, firmware.json and its images, which every 2.x CLI reads; other boards add their own
+manifest and suffixed images, which CLIs from before that board ignore.
+"""
 
 import argparse
 import hashlib
@@ -17,11 +22,30 @@ EXPECTED_PARTITIONS = [
     (1, 1, 0xF000, 0x1000, "phy_init", 0),
     (0, 0, 0x10000, 0x100000, "factory", 0),
 ]
-IMAGE_ROLES = [
-    ("bootloader", "bootloader", "bootloader.bin", 0x1000, 0x7000),
-    ("partition-table", "partition-table", "partition-table.bin", 0x8000, 0x1000),
-    ("application", "app", "pipkin.bin", 0x10000, 0x100000),
-]
+# Per ESP-IDF target: board profile, image header chip ID, bootloader offset and maximum size,
+# and the suffix of its release asset names.
+BOARDS = {
+    "esp32": {"board": "esp32-2432s028r", "chip_id": 0, "bootloader": (0x1000, 0x7000), "suffix": ""},
+    "esp32s3": {"board": "es3c40p", "chip_id": 9, "bootloader": (0x0, 0x8000), "suffix": "-es3c40p"},
+}
+
+
+def image_roles(board):
+    """(role, flasher_args key, build file name, release file name, offset, maximum size)."""
+    offset, maximum = board["bootloader"]
+    suffix = board["suffix"]
+    return [
+        ("bootloader", "bootloader", "bootloader.bin", f"bootloader{suffix}.bin", offset, maximum),
+        ("partition-table", "partition-table", "partition-table.bin", f"partition-table{suffix}.bin",
+         0x8000, 0x1000),
+        ("application", "app", "pipkin.bin", f"pipkin{suffix}.bin", 0x10000, 0x100000),
+    ]
+
+
+def release_names(board):
+    """The board's manifest and demo reel asset names."""
+    suffix = board["suffix"]
+    return f"firmware{suffix}.json", f"pipkin-demo{suffix}.bin"
 SDK_NOTICES = [
     "LICENSE",
     "docs/en/COPYRIGHT.rst",
@@ -46,20 +70,20 @@ def c_string(data):
     return data.split(b"\0", 1)[0].decode("ascii")
 
 
-def board_profile(source_dir):
-    """Read the board profile compiled into the firmware."""
+def board_profiles(source_dir):
+    """Read the board profiles main/board.h can compile."""
     header = (Path(source_dir) / "main/board.h").read_text()
     matches = re.findall(r'constexpr char kProfile\[\] = "([a-z0-9]+(?:-[a-z0-9]+)*)";', header)
-    require(len(matches) == 1, "board header must define one kProfile")
-    return matches[0]
+    require(matches and len(set(matches)) == len(matches), "board header must define distinct kProfile values")
+    return matches
 
 
-def validate_image(data, name):
-    """Check the ESP32 header, segment lengths, XOR checksum and appended digest."""
+def validate_image(data, name, chip_id=0):
+    """Check the ESP header, segment lengths, XOR checksum and appended digest."""
     require(len(data) >= 24, f"{name}: truncated ESP image")
     require(data[0] == 0xE9 and 1 <= data[1] <= 16, f"{name}: invalid ESP image header")
     require(data[2] == 2 and data[3] == 0x20, f"{name}: expected DIO, 40 MHz, 4 MB image")
-    require(struct.unpack_from("<H", data, 12)[0] == 0, f"{name}: expected ESP32 chip")
+    require(struct.unpack_from("<H", data, 12)[0] == chip_id, f"{name}: image is for another chip")
     require(data[23] == 1, f"{name}: appended SHA-256 required")
     cursor, checksum = 24, 0xEF
     for _ in range(data[1]):
@@ -89,18 +113,19 @@ def validate_application(data, version, revision, board, name="application"):
             f"{name}: compiled board profile differs from main/board.h; rebuild first")
 
 
-def demo_application(build_dir, version, revision, board):
-    """The demo reel build (-DPIPKIN_DEMO=ON), which pipkin flash --demo writes in place of
-    pipkin.bin. It is versioned <version>-demo and stays out of firmware.json."""
+def demo_application(build_dir, version, revision, target):
+    """A demo reel build (-DPIPKIN_DEMO=ON), which pipkin flash --demo writes in place of the
+    board's application. It is versioned <version>-demo and stays out of the manifests."""
     build_dir = Path(build_dir).resolve()
     project = json.loads((build_dir / "project_description.json").read_text())
-    require(project["project_name"] == "pipkin" and project["target"] == "esp32",
-            "demo: expected a pipkin ESP32 build")
+    require(project["project_name"] == "pipkin" and project["target"] == target,
+            f"demo: expected a pipkin {target} build")
     require(project["project_version"] == f"{version}-demo", "demo: build version differs from the release")
     data = (build_dir / "pipkin.bin").read_bytes()
     require(0 < len(data) <= 0x100000, "demo: image does not fit its flash region")
-    validate_image(data, "demo")
-    validate_application(data, f"{version}-demo", revision, board, "demo")
+    board = BOARDS[target]
+    validate_image(data, "demo", board["chip_id"])
+    validate_application(data, f"{version}-demo", revision, board["board"], "demo")
     return data
 
 
@@ -129,7 +154,7 @@ def validate_partitions(data):
             "partition table: does not match esp32-single-app-v1; NVS must not move")
 
 
-def third_party_notices(project, source_dir):
+def third_party_notices(project, source_dir, targets):
     sdk = Path(project["idf_path"])
     compiler = Path(project["c_compiler"]).resolve()
     runtime = compiler.parent.parent / "share/licenses"
@@ -142,37 +167,38 @@ def third_party_notices(project, source_dir):
             sections.append(f"\n===== {prefix}/{name} =====\n\n{text.rstrip()}\n")
     tlsf = (source_dir / "assets/TLSF-BSD-3-Clause.txt").read_text(encoding="utf-8")
     sections.append(f"\n===== TLSF (BSD-3-Clause) =====\n\n{tlsf}")
-    # Xtensa's MIT terms and copyright years are in its source headers.
-    xtensa = sdk / "components/xtensa/esp32/include/xtensa/config/core-isa.h"
-    text = xtensa.read_text(encoding="utf-8")
-    start = text.rindex("/*", 0, text.index("Copyright"))
-    end = text.index("*/", start) + 2
-    require("Permission is hereby granted" in text[start:end], "missing Xtensa MIT licence notice")
-    sections.append(f"\n===== ESP32 Xtensa header notice =====\n\n{text[start:end]}\n")
+    # Xtensa's MIT terms and copyright years are in each chip's source headers.
+    for target in targets:
+        xtensa = sdk / f"components/xtensa/{target}/include/xtensa/config/core-isa.h"
+        text = xtensa.read_text(encoding="utf-8")
+        start = text.rindex("/*", 0, text.index("Copyright"))
+        end = text.index("*/", start) + 2
+        require("Permission is hereby granted" in text[start:end], "missing Xtensa MIT licence notice")
+        name = target.upper().replace("ESP32S3", "ESP32-S3")
+        sections.append(f"\n===== {name} Xtensa header notice =====\n\n{text[start:end]}\n")
     return "".join(sections).encode("utf-8")
 
 
-def package(build_dir, output_dir, source_dir, revision, tag=None, demo_build_dir=None):
+def board_build(build_dir, source_dir, revision, tag):
+    """Validate one board's build; returns its target, manifest and release payloads."""
     build_dir = Path(build_dir).resolve()
-    output_dir = Path(output_dir).resolve()
-    source_dir = Path(source_dir).resolve()
-    board = board_profile(source_dir)
-    require(re.fullmatch(r"[0-9a-f]{40}", revision), "source revision must be a full lowercase Git SHA")
     project = json.loads((build_dir / "project_description.json").read_text())
     version = project["project_version"]
     require(re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version),
             "project version must be a stable semantic version")
     require(tag is None or tag == f"v{version}", "release tag differs from firmware project version")
-    require(project["project_name"] == "pipkin" and project["target"] == "esp32",
-            "expected a pipkin ESP32 build")
+    target = project["target"]
+    require(project["project_name"] == "pipkin" and target in BOARDS, "expected a pipkin build for a supported board")
+    board = BOARDS[target]
+    require(board["board"] in board_profiles(source_dir), "main/board.h does not define the build's board profile")
     config = json.loads((build_dir / "flasher_args.json").read_text())
     require(config["flash_settings"] == FLASH_SETTINGS, "flash settings differ from DIO, 40 MHz and 4 MB")
     args = config["write_flash_args"]
     require(len(args) == 6 and {args[i]: args[i + 1] for i in range(0, 6, 2)} ==
             {f"--{key}": value for key, value in FLASH_SETTINGS.items()}, "inconsistent write_flash_args")
-    require(config["extra_esptool_args"]["chip"] == "esp32", "flasher chip must be esp32")
+    require(config["extra_esptool_args"]["chip"] == target, f"flasher chip must be {target}")
     payloads, images, flash_files = {}, [], {}
-    for role, key, filename, expected_offset, maximum_size in IMAGE_ROLES:
+    for role, key, filename, release_name, expected_offset, maximum_size in image_roles(board):
         description = config[key]
         offset = int(description["offset"], 0)
         require(offset == expected_offset, f"{role}: offset differs from the initial flash layout")
@@ -186,24 +212,48 @@ def package(build_dir, output_dir, source_dir, revision, tag=None, demo_build_di
         if role == "partition-table":
             validate_partitions(data)
         else:
-            validate_image(data, role)
+            validate_image(data, role, board["chip_id"])
         if role == "application":
-            validate_application(data, version, revision, board)
-        payloads[filename] = data
-        images.append({"role": role, "file": filename, "offset": offset,
+            validate_application(data, version, revision, board["board"])
+        payloads[release_name] = data
+        images.append({"role": role, "file": release_name, "offset": offset,
                        "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
     require({int(offset, 0): filename for offset, filename in config["flash_files"].items()} == flash_files,
             "flash_files differs from the selected three images")
     manifest = {"product": "pipkin", "version": version, "source_revision": revision,
-                "board": board, "images": images}
-    payloads["firmware.json"] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
-    if demo_build_dir is not None:
-        payloads["pipkin-demo.bin"] = demo_application(demo_build_dir, version, revision, board)
+                "board": board["board"], "images": images}
+    manifest_name, _ = release_names(board)
+    payloads[manifest_name] = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    return target, project, manifest, payloads
+
+
+def package(build_dirs, output_dir, source_dir, revision, tag=None, demo_build_dirs=()):
+    """Package one build per board, the CYD's first. Returns the CYD's manifest."""
+    output_dir = Path(output_dir).resolve()
+    source_dir = Path(source_dir).resolve()
+    require(re.fullmatch(r"[0-9a-f]{40}", revision), "source revision must be a full lowercase Git SHA")
+    builds = [board_build(path, source_dir, revision, tag) for path in build_dirs]
+    targets = [target for target, _, _, _ in builds]
+    require(targets and targets[0] == "esp32", "the first build must be the esp32 CYD, which firmware.json describes")
+    require(len(set(targets)) == len(targets), "each board needs exactly one build")
+    versions = {manifest["version"] for _, _, manifest, _ in builds}
+    require(len(versions) == 1, "board builds have different firmware versions")
+    version = versions.pop()
+    payloads = {}
+    for _, _, _, board_payloads in builds:
+        payloads.update(board_payloads)
+    demo_targets = set()
+    for path in demo_build_dirs:
+        target = json.loads((Path(path).resolve() / "project_description.json").read_text()).get("target")
+        require(target in targets and target not in demo_targets, "each demo reel needs its board's build, once")
+        demo_targets.add(target)
+        _, demo_name = release_names(BOARDS[target])
+        payloads[demo_name] = demo_application(path, version, revision, target)
     payloads["LICENSE"] = (source_dir / "LICENSE").read_bytes()
     payloads["NOTICE.md"] = (source_dir / "assets/NOTICE.md").read_text().replace(
         "[LICENSE](../LICENSE)", "[LICENSE](LICENSE)").encode("utf-8")
     payloads["Inter-OFL.txt"] = (source_dir / "assets/Inter-OFL.txt").read_bytes()
-    payloads["third-party-notices.txt"] = third_party_notices(project, source_dir)
+    payloads["third-party-notices.txt"] = third_party_notices(builds[0][1], source_dir, targets)
     payloads["SHA256SUMS"] = "".join(
         f"{hashlib.sha256(data).hexdigest()}  {name}\n"
         for name, data in sorted(payloads.items())).encode("ascii")
@@ -211,13 +261,15 @@ def package(build_dir, output_dir, source_dir, revision, tag=None, demo_build_di
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, data in payloads.items():
         (output_dir / name).write_bytes(data)
-    return manifest
+    return builds[0][2]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build-dir", type=Path, default=Path("build"))
-    parser.add_argument("--demo-build-dir", type=Path, help="Also package this demo reel build")
+    parser.add_argument("--build-dir", type=Path, action="append",
+                        help="A board's build, the esp32 CYD first; repeat for each board (default: build)")
+    parser.add_argument("--demo-build-dir", type=Path, action="append", default=[],
+                        help="Also package this demo reel build; repeat for each board")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--source-dir", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--source-revision", help="Full Git commit SHA; defaults to source HEAD")
@@ -226,8 +278,8 @@ def main():
     try:
         revision = args.source_revision or subprocess.check_output(
             ["git", "-C", str(args.source_dir), "rev-parse", "HEAD"], text=True).strip()
-        manifest = package(args.build_dir, args.output_dir, args.source_dir, revision, args.tag,
-                           args.demo_build_dir)
+        manifest = package(args.build_dir or [Path("build")], args.output_dir, args.source_dir, revision,
+                           args.tag, args.demo_build_dir)
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Cannot package firmware: {error}\n")
     print(f"Packaged Pipkin {manifest['version']} ({manifest['source_revision'][:12]}) in {args.output_dir}")

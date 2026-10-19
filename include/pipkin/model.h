@@ -8,8 +8,22 @@
 
 namespace pipkin {
 
+// Panel pixels. The 4-inch build (PIPKIN_DISPLAY_480X320) draws the 320 x 240 layout 4/3 larger,
+// using the extra width; layout and touch coordinates are panel pixels divided by that scale.
+#if PIPKIN_DISPLAY_480X320
+constexpr int kDisplayWidth = 480;
+constexpr int kDisplayHeight = 320;
+constexpr int kScaleNumerator = 4;
+constexpr int kScaleDenominator = 3;
+#else
 constexpr int kDisplayWidth = 320;
 constexpr int kDisplayHeight = 240;
+constexpr int kScaleNumerator = 1;
+constexpr int kScaleDenominator = 1;
+#endif
+constexpr int kLayoutWidth = kDisplayWidth * kScaleDenominator / kScaleNumerator;
+constexpr int kLayoutHeight = kDisplayHeight * kScaleDenominator / kScaleNumerator;
+static_assert(kLayoutHeight == 240);
 // Touch regions follow the rendered layout.
 constexpr int kOverviewSplit = 110;
 constexpr int kNavigationTop = 208;
@@ -173,6 +187,7 @@ bool page_visible(const State& state, Page page);
 Page effective_page(const State& state);
 void restore_page(State& state, Page page, uint64_t now_ms = 0);
 Page selected_page(const State& state);
+// Touch coordinates are layout coordinates (kLayoutWidth x kLayoutHeight).
 void tap(State& state, int x, int y, uint64_t now_ms);
 void swipe(State& state, int direction, uint64_t now_ms);
 void touch(State& state, bool pressed, int x, int y, uint64_t now_ms);

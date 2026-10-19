@@ -82,10 +82,17 @@ Pipkin shows you what it's about to install and waits for you to say yes.
 
 ## Build your own
 
-Pipkin runs on an ESP32 "Cheap Yellow Display" (CYD), a small touchscreen board that
-costs around US$17 / A$25 online. [This AliExpress listing](https://www.aliexpress.com/item/1005009383089648.html)
-is one example. Install the helper, plug the board in with a USB data cable and run
-`pipkin flash`.
+Pipkin runs on either of two touchscreen boards you can buy online:
+
+- the 2.8-inch ESP32 "Cheap Yellow Display" (CYD), around US$17 / A$25.
+  [This AliExpress listing](https://www.aliexpress.com/item/1005009383089648.html) is
+  one example.
+- the larger 4-inch LCDWIKI ES3C40P, an ESP32-S3 board with an IPS capacitive
+  screen. [This AliExpress listing](https://www.aliexpress.com/item/1005012905527175.html)
+  is one example; either variant, with or without a speaker, works.
+
+Install the helper, plug the board in with a USB data cable and run `pipkin flash`.
+With both plugged in, it asks which one to set up.
 
 To build the firmware yourself, see the [developer guide](docs/development.md).
 

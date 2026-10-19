@@ -129,7 +129,7 @@ void show_about(State& state, bool open, uint64_t now_ms) {
 }
 
 bool on_screen(int x, int y) {
-    return x >= 0 && x < kDisplayWidth && y >= 0 && y < kDisplayHeight;
+    return x >= 0 && x < kLayoutWidth && y >= 0 && y < kLayoutHeight;
 }
 
 // A tap or swipe first closes About; navigating needs a second page.
@@ -165,7 +165,7 @@ void tap(State& state, int x, int y, uint64_t now_ms) {
     const auto pages = visible_pages(state);
     const int first_end = pages.count == 2 ? kNavigationTop : kOverviewSplit;
     if (y >= kNavigationTop)
-        swipe(state, x < kDisplayWidth / 2 ? -1 : 1, now_ms);
+        swipe(state, x < kLayoutWidth / 2 ? -1 : 1, now_ms);
     else if (page == Page::Overview && y < first_end)
         restore_page(state, pages.pages[1], now_ms);
     else if (page == Page::Overview && pages.count == 3 && y >= kOverviewSplit)

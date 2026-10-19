@@ -1,5 +1,7 @@
 /build/
 /build-demo/
+/build-es3c40p/
+/build-es3c40p-demo/
 /sdkconfig
 /sdkconfig.old
 .DS_Store

@@ -10,6 +10,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "pipkin/model.h"
+#if PIPKIN_BOARD_ES3C40P
+#include "driver/i2c_master.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -22,13 +25,48 @@ constexpr int kHeight = pipkin::kDisplayHeight;
 constexpr std::size_t kBandBytes = kWidth * kDisplayBandRows * sizeof(uint16_t);
 
 esp_lcd_panel_io_handle_t lcd;
-spi_device_handle_t touch;
 std::array<uint8_t*, 2> band_buffers{};
 std::size_t next_buffer = 0;
 
 void lcd_command(int command, const void* bytes = nullptr, std::size_t length = 0) {
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(lcd, command, bytes, length));
 }
+
+#if PIPKIN_BOARD_ES3C40P
+i2c_master_dev_handle_t touch;
+
+// Holds the FT6336U in reset until the panel is ready; it needs time to start afterwards.
+void touch_reset() {
+    gpio_config_t reset{};
+    reset.pin_bit_mask = 1ULL << board::kTouchReset;
+    reset.mode = GPIO_MODE_OUTPUT;
+    ESP_ERROR_CHECK(gpio_config(&reset));
+    ESP_ERROR_CHECK(gpio_set_level(static_cast<gpio_num_t>(board::kTouchReset), 0));
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_ERROR_CHECK(gpio_set_level(static_cast<gpio_num_t>(board::kTouchReset), 1));
+}
+
+void touch_init() {
+    i2c_master_bus_config_t bus{};
+    bus.i2c_port = I2C_NUM_0;
+    bus.sda_io_num = static_cast<gpio_num_t>(board::kTouchSda);
+    bus.scl_io_num = static_cast<gpio_num_t>(board::kTouchScl);
+    bus.clk_source = I2C_CLK_SRC_DEFAULT;
+    bus.glitch_ignore_cnt = 7;
+    i2c_master_bus_handle_t handle;
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus, &handle));
+    i2c_device_config_t device{};
+    device.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    device.device_address = board::kTouchAddress;
+    device.scl_speed_hz = 400'000;
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(handle, &device, &touch));
+    // Polling mode keeps INT low while a finger is down. A controller that is still starting
+    // ignores this, and touch_read() polls the touch registers anyway.
+    const uint8_t polling[] = {0xA4, 0x00};
+    i2c_master_transmit(touch, polling, sizeof(polling), 50);
+}
+#else
+spi_device_handle_t touch;
 
 uint16_t touch_sample(uint8_t command) {
     spi_transaction_t transaction{};
@@ -47,6 +85,24 @@ int touch_median(uint8_t command) {
     return samples[1];
 }
 
+void touch_init(spi_bus_config_t bus) {
+    bus.mosi_io_num = board::kTouchMosi;
+    bus.miso_io_num = board::kTouchMiso;
+    bus.sclk_io_num = board::kTouchClock;
+    bus.max_transfer_sz = 3;
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &bus, SPI_DMA_DISABLED));
+    spi_device_interface_config_t device{};
+    device.clock_speed_hz = 1'000'000;
+    device.spics_io_num = board::kTouchSelect;
+    device.queue_size = 1;
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI3_HOST, &device, &touch));
+    gpio_config_t input{};
+    input.pin_bit_mask = 1ULL << board::kTouchInterrupt;
+    input.mode = GPIO_MODE_INPUT;
+    ESP_ERROR_CHECK(gpio_config(&input));
+}
+#endif
+
 } // namespace
 
 void display_backlight(int permille) {
@@ -57,7 +113,14 @@ void display_backlight(int permille) {
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
 }
 
+// Display off (0x28) and on (0x29). A dark panel left showing a still frame, such as the
+// setup QR code, can keep a faint ghost of it, so it shows nothing while the backlight is off.
+void display_power(bool on) { lcd_command(on ? 0x29 : 0x28); }
+
 void display_init() {
+#if PIPKIN_BOARD_ES3C40P
+    touch_reset();
+#endif
     ledc_timer_config_t timer{};
     timer.speed_mode = LEDC_LOW_SPEED_MODE;
     timer.duty_resolution = LEDC_TIMER_10_BIT;
@@ -96,29 +159,17 @@ void display_init() {
         ESP_ERROR_CHECK(buffer ? ESP_OK : ESP_ERR_NO_MEM);
     }
 
-    lcd_command(0x01);
-    vTaskDelay(pdMS_TO_TICKS(150));
-    lcd_command(0x11);
-    vTaskDelay(pdMS_TO_TICKS(120));
-    const uint8_t format = 0x55;
-    lcd_command(0x3A, &format, 1);
-    lcd_command(0x36, &board::kLcdMemoryAccess, 1);
-    lcd_command(0x29);
+    for (const auto& step : board::kLcdInit) {
+        lcd_command(step.command, step.length ? step.data : nullptr, step.length);
+        if (step.delay_ms)
+            vTaskDelay(pdMS_TO_TICKS(step.delay_ms));
+    }
 
-    bus.mosi_io_num = board::kTouchMosi;
-    bus.miso_io_num = board::kTouchMiso;
-    bus.sclk_io_num = board::kTouchClock;
-    bus.max_transfer_sz = 3;
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &bus, SPI_DMA_DISABLED));
-    spi_device_interface_config_t device{};
-    device.clock_speed_hz = 1'000'000;
-    device.spics_io_num = board::kTouchSelect;
-    device.queue_size = 1;
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI3_HOST, &device, &touch));
-    gpio_config_t input{};
-    input.pin_bit_mask = 1ULL << board::kTouchInterrupt;
-    input.mode = GPIO_MODE_INPUT;
-    ESP_ERROR_CHECK(gpio_config(&input));
+#if PIPKIN_BOARD_ES3C40P
+    touch_init();
+#else
+    touch_init(bus);
+#endif
 }
 
 void display_rows(int y, int rows, const uint16_t* pixels) {
@@ -142,6 +193,20 @@ void display_rows(int y, int rows, const uint16_t* pixels) {
 }
 
 bool touch_read(int& x, int& y) {
+#if PIPKIN_BOARD_ES3C40P
+    // TD_STATUS, then the first point: event and X high bits, X low, Y high bits, Y low.
+    const uint8_t start = 0x02;
+    uint8_t point[5]{};
+    if (i2c_master_transmit_receive(touch, &start, 1, point, sizeof(point), 10) != ESP_OK)
+        return false;
+    const int count = point[0] & 0x0f;
+    const int event = point[1] >> 6;
+    // Counts above two are noise; event 1 is a lift.
+    if (count < 1 || count > 2 || event == 1)
+        return false;
+    board::touch_to_panel(((point[1] & 0x0f) << 8) | point[2], ((point[3] & 0x0f) << 8) | point[4],
+                          x, y);
+#else
     if (gpio_get_level(static_cast<gpio_num_t>(board::kTouchInterrupt)) != 0)
         return false;
     int raw_x = touch_median(0xD0);
@@ -152,5 +217,9 @@ bool touch_read(int& x, int& y) {
         std::swap(raw_x, raw_y);
     x = board::touch_coordinate(raw_x, board::kTouchXStart, board::kTouchXEnd, kWidth);
     y = board::touch_coordinate(raw_y, board::kTouchYStart, board::kTouchYEnd, kHeight);
+#endif
+    // Panel pixels to the layout's coordinates.
+    x = x * pipkin::kLayoutWidth / kWidth;
+    y = y * pipkin::kLayoutHeight / kHeight;
     return true;
 }

@@ -1,7 +1,12 @@
 #include "pipkin/render.h"
-#include "font_data.h"
 #include "setup_qr_data.h"
+#if PIPKIN_DISPLAY_480X320
+#include "font_data_480x320.h"
+#include "wordmark_data_480x320.h"
+#else
+#include "font_data.h"
 #include "wordmark_data.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -29,6 +34,24 @@ constexpr auto task_working = rgb(110, 170, 250);
 constexpr auto task_attention = rgb(245, 190, 70);
 constexpr auto task_blocked = rgb(240, 96, 96);
 constexpr float pi = 3.14159265f;
+
+// Layout edges. The 4-inch layout is 360 wide, and its extra width goes to the columns.
+constexpr int kCentre = kLayoutWidth / 2;
+constexpr int kRight = kLayoutWidth - 16;
+constexpr int kContentWidth = kLayoutWidth - 32;
+constexpr int kColumnWidth = (kContentWidth - 16) / 2;
+
+// Layout to panel pixels, exact on the 320 x 240 panel.
+constexpr float kScale = static_cast<float>(kScaleNumerator) / kScaleDenominator;
+int panel(int v) {
+    return kScaleNumerator == kScaleDenominator ? v
+                                                : static_cast<int>(std::floor(v * kScale + 0.5f));
+}
+float panel(float v) { return v * kScale; }
+int layout(int v) {
+    return kScaleNumerator == kScaleDenominator ? v
+                                                : static_cast<int>(std::floor(v / kScale + 0.5f));
+}
 
 bool revealing(const State& state, uint64_t now) {
     return state.overlay == Overlay::None && !state.about_open && state.view_revision > 0 &&
@@ -99,18 +122,21 @@ struct Segment {
     float x0, y0, x1, y1;
 };
 
-// Draws into the band of rows [top, bottom); pixels holds only that band.
+// Draws into the band of panel rows [top, bottom); pixels holds only that band. Drawing calls
+// take layout coordinates, except where they say panel pixels.
 struct Canvas {
     uint16_t* pixels;
     int top;
     int bottom;
+    // At panel pixel (x, y).
     void pixel(int x, int y, uint16_t color, int alpha = 15) {
         if (x < 0 || x >= kDisplayWidth || y < top || y >= bottom)
             return;
         auto& target = pixels[(y - top) * kDisplayWidth + x];
         target = alpha >= 15 ? color : blend(target, color, alpha);
     }
-    void rect(int x, int y, int w, int h, uint16_t color) {
+    // In panel pixels.
+    void fill(int x, int y, int w, int h, uint16_t color) {
         const int left = std::max(x, 0);
         const int right = std::min(x + w, kDisplayWidth);
         if (left >= right)
@@ -118,7 +144,16 @@ struct Canvas {
         for (int j = std::max(y, top); j < std::min(y + h, bottom); ++j)
             std::fill_n(pixels + (j - top) * kDisplayWidth + left, right - left, color);
     }
-    int width(const char* text, const font::Font& f) const {
+    // At least one panel pixel in each direction, so hairlines survive scaling.
+    void rect(int x, int y, int w, int h, uint16_t color) {
+        if (w <= 0 || h <= 0)
+            return;
+        const int left = panel(x);
+        const int high = panel(y);
+        fill(left, high, std::max(panel(x + w) - left, 1), std::max(panel(y + h) - high, 1), color);
+    }
+    // In panel pixels.
+    int panel_width(const char* text, const font::Font& f) const {
         int w = 0;
         for (; *text; ++text) {
             auto c = static_cast<unsigned char>(*text);
@@ -127,7 +162,8 @@ struct Canvas {
         }
         return w;
     }
-    // A w by h map of 4-bit coverage, two pixels a byte, high nibble first.
+    int width(const char* text, const font::Font& f) const { return layout(panel_width(text, f)); }
+    // A w by h map of 4-bit coverage, two pixels a byte, high nibble first, at panel pixel (x, y).
     void coverage_map(int x, int y, int w, int h, const uint8_t* coverage, uint16_t color) {
         const int first = std::max(0, top - y);
         const int last = std::min(h, bottom - y);
@@ -139,7 +175,8 @@ struct Canvas {
                     pixel(x + i, y + j, color, a);
             }
     }
-    void text(int x, int y, const char* text, const font::Font& f, uint16_t color) {
+    // At panel pixel (x, y).
+    void text_at(int x, int y, const char* text, const font::Font& f, uint16_t color) {
         for (; *text; ++text) {
             auto c = static_cast<unsigned char>(*text);
             if (c < 32 || c > 126)
@@ -150,24 +187,32 @@ struct Canvas {
             x += advance(f, c);
         }
     }
+    void text(int x, int y, const char* s, const font::Font& f, uint16_t color) {
+        text_at(panel(x), panel(y), s, f, color);
+    }
     void centered(int x, int y, const char* s, const font::Font& f, uint16_t color) {
-        text(x - width(s, f) / 2, y, s, f, color);
+        text_at(panel(x) - panel_width(s, f) / 2, panel(y), s, f, color);
     }
     void right(int x, int y, const char* s, const font::Font& f, uint16_t color) {
-        text(x - width(s, f), y, s, f, color);
+        text_at(panel(x) - panel_width(s, f), panel(y), s, f, color);
     }
     void coverage_pixel(int x, int y, float coverage, uint16_t color) {
         if (coverage > 0)
             pixel(x, y, color, static_cast<int>(std::min(1.0f, coverage) * 15 + 0.5f));
     }
-    void round_rect(int x, int y, int w, int h, float radius, uint16_t color) {
-        for (int j = std::max(y, top); j < std::min(y + h, bottom); ++j)
-            for (int i = x; i < x + w; ++i) {
+    void round_rect(float x, float y, float w, float h, float radius, uint16_t color) {
+        const float left = panel(x), right = panel(x + w), high = panel(y), low = panel(y + h);
+        const float r = panel(radius);
+        const int first = std::max(static_cast<int>(std::floor(high)), top);
+        const int last = std::min(static_cast<int>(std::ceil(low)), bottom);
+        for (int j = first; j < last; ++j)
+            for (int i = static_cast<int>(std::floor(left)); i < static_cast<int>(std::ceil(right));
+                 ++i) {
                 const float px = i + 0.5f;
                 const float py = j + 0.5f;
-                const float dx = std::max({x + radius - px, px - (x + w - radius), 0.0f});
-                const float dy = std::max({y + radius - py, py - (y + h - radius), 0.0f});
-                coverage_pixel(i, j, radius + 0.5f - std::sqrt(dx * dx + dy * dy), color);
+                const float dx = std::max({left + r - px, px - (right - r), 0.0f});
+                const float dy = std::max({high + r - py, py - (low - r), 0.0f});
+                coverage_pixel(i, j, r + 0.5f - std::sqrt(dx * dx + dy * dy), color);
             }
     }
     void line(float x0, float y0, float x1, float y1, float width, uint16_t color) {
@@ -175,8 +220,14 @@ struct Canvas {
         strokes(&segment, 1, width, color);
     }
     // Round-capped segments stroked as one shape, so joins and crossings are not drawn twice.
-    void strokes(const Segment* segments, int count, float width, uint16_t color) {
-        const float half = width / 2;
+    void strokes(const Segment* layout_segments, int count, float width, uint16_t color) {
+        Segment segments[4];
+        count = std::min(count, 4);
+        for (int n = 0; n < count; ++n) {
+            const auto& s = layout_segments[n];
+            segments[n] = {panel(s.x0), panel(s.y0), panel(s.x1), panel(s.y1)};
+        }
+        const float half = panel(width) / 2;
         float left = segments[0].x0, right = left, high = segments[0].y0, low = high;
         for (int n = 0; n < count; ++n) {
             const auto& s = segments[n];
@@ -207,6 +258,10 @@ struct Canvas {
             }
     }
     void ellipse(float cx, float cy, float rx, float ry, uint16_t color) {
+        cx = panel(cx);
+        cy = panel(cy);
+        rx = panel(rx);
+        ry = panel(ry);
         const float edge = std::min(rx, ry);
         const int first = std::max(static_cast<int>(cy - ry - 1), top);
         const int last = std::min(static_cast<int>(cy + ry + 1), bottom - 1);
@@ -219,6 +274,10 @@ struct Canvas {
     }
     // from/to are fractions of a 270-degree sweep with rounded ends.
     void arc(int cx, int cy, float middle, float half, float from, float to, uint16_t color) {
+        cx = panel(cx);
+        cy = panel(cy);
+        middle = panel(middle);
+        half = panel(half);
         // Single-precision math: the ESP32 FPU has no double-precision support.
         constexpr float start = pi * 0.75f;
         constexpr float sweep = pi * 1.5f;
@@ -435,18 +494,22 @@ void clock_text(Canvas& c, const State& state, uint64_t now, bool centred) {
         std::snprintf(value, sizeof(value), "%02u:%02u", static_cast<unsigned>(second / 3600),
                       static_cast<unsigned>(second / 60 % 60));
     }
+    // Laid out in panel pixels, so the tabular digits stay evenly spaced.
     const auto& size = font::size12;
     const int digit = cell(size);
-    constexpr int colon = 4;
-    int x = centred ? (kDisplayWidth - digit * 4 - colon) / 2 : 304 - digit * 4 - colon;
+    const int colon = panel(4);
+    const int span = digit * 4 + colon;
+    int x = centred ? (kDisplayWidth - span) / 2 : panel(kRight) - span;
+    const int dot = std::max(panel(1), 1);
     for (int i = 0; i < 5; ++i) {
         const int width = i == 2 ? colon : digit;
         const char text[] = {value[i], 0};
         if (i == 2) {
-            c.rect(x + width / 2, 14, 1, 1, foreground);
-            c.rect(x + width / 2, 18, 1, 1, foreground);
+            c.fill(x + width / 2, panel(14), dot, dot, foreground);
+            c.fill(x + width / 2, panel(18), dot, dot, foreground);
         } else
-            c.centered(x + width / 2, 9, text, size, foreground);
+            c.text_at(x + width / 2 - c.panel_width(text, size) / 2, panel(9), text, size,
+                      foreground);
         x += width;
     }
 }
@@ -455,7 +518,7 @@ void page_indicator(Canvas& c, const State& state) {
     const auto pages = visible_pages(state);
     const auto selected = effective_page(state);
     constexpr int spacing = 14;
-    const int first = kDisplayWidth / 2 - (pages.count - 1) * spacing / 2;
+    const int first = kCentre - (pages.count - 1) * spacing / 2;
     for (int i = 0; i < pages.count; ++i) {
         const bool current = selected == pages.pages[i];
         const int x = first + i * spacing;
@@ -511,9 +574,9 @@ void provider_heading(Canvas& c, const State& state, int index, int y, uint64_t 
     const auto& p = state.providers[index];
     provider_title(c, index, y);
     banked(c, p, index, y + 8, now);
-    const int dots = task_dots(c, state, index, 304, y + 8, now);
+    const int dots = task_dots(c, state, index, kRight, y + 8, now);
     if (const char* status = freshness(p, now))
-        c.right(dots ? 294 - dots : 304, y + 2, status, font::size11, caution);
+        c.right(dots ? kRight - 10 - dots : kRight, y + 2, status, font::size11, caution);
 }
 
 void overview_window(Canvas& c, const State& state, int x, int y, int width, const Window& w,
@@ -551,11 +614,13 @@ void provider_row(Canvas& c, const State& state, int index, int y, bool expanded
     const auto& p = state.providers[index];
     provider_heading(c, state, index, y, now);
     if (session_visible(p)) {
-        overview_window(c, state, 16, y + 25, 136, p.session, false, expanded, now, progress);
-        overview_window(c, state, 168, y + 25, 136, p.weekly, true, expanded, now, progress);
+        overview_window(c, state, 16, y + 25, kColumnWidth, p.session, false, expanded, now,
+                        progress);
+        overview_window(c, state, 32 + kColumnWidth, y + 25, kColumnWidth, p.weekly, true,
+                        expanded, now, progress);
     } else
-        overview_window(c, state, 16, y + 25, 288, p.weekly, true, expanded, now, progress,
-                        session_note(p));
+        overview_window(c, state, 16, y + 25, kContentWidth, p.weekly, true, expanded, now,
+                        progress, session_note(p));
 }
 
 // Two dials share a detail page; a lone weekly dial is larger.
@@ -567,6 +632,8 @@ struct Dial {
 };
 constexpr Dial kPairedDial{58, font::size36, -30, 10};
 constexpr Dial kLoneDial{64, font::size48, -40, 14};
+// Paired dials sit this far either side of the centre, spreading with the layout width.
+constexpr int kDialOffset = 76 * kLayoutWidth / 320;
 
 void detail_window(Canvas& c, const State& state, const Window& w, bool weekly, int cx, int cy,
                    const Dial& dial, uint64_t now, double progress) {
@@ -590,7 +657,7 @@ void detail(Canvas& c, const State& state, uint64_t now, double progress) {
     const auto& p = state.providers[index];
     provider_title(c, index, 8);
     banked(c, p, index, 16, now);
-    task_dots(c, state, index, 304, 16, now);
+    task_dots(c, state, index, kRight, 16, now);
     const char* footer = connection(state);
     if (!footer)
         footer = freshness(p, now);
@@ -599,12 +666,14 @@ void detail(Canvas& c, const State& state, uint64_t now, double progress) {
     // The dials sit midway between the heading and the page dots, rising to make room for a note.
     const int cy = footer ? 127 : 133;
     if (session_visible(p)) {
-        detail_window(c, state, p.session, false, 84, cy, kPairedDial, now, progress);
-        detail_window(c, state, p.weekly, true, 236, cy, kPairedDial, now, progress);
+        detail_window(c, state, p.session, false, kCentre - kDialOffset, cy, kPairedDial, now,
+                      progress);
+        detail_window(c, state, p.weekly, true, kCentre + kDialOffset, cy, kPairedDial, now,
+                      progress);
     } else
-        detail_window(c, state, p.weekly, true, 160, cy, kLoneDial, now, progress);
+        detail_window(c, state, p.weekly, true, kCentre, cy, kLoneDial, now, progress);
     if (footer)
-        c.centered(160, 203, footer, font::size11, caution);
+        c.centered(kCentre, 203, footer, font::size11, caution);
 }
 
 void short_age(uint64_t milliseconds, char* out, std::size_t length) {
@@ -660,7 +729,7 @@ void provider_status(Canvas& c, const ProviderData& p, int index, int y, uint64_
             short_age(now - window.freshness.received_ms, age, sizeof(age));
         std::snprintf(text, sizeof(text), "Received %s ago", age);
     }
-    c.right(304, y + 2, text, font::size11,
+    c.right(kRight, y + 2, text, font::size11,
             window.freshness.known_stale(now) ? caution : secondary);
 }
 
@@ -681,16 +750,16 @@ void about(Canvas& c, const State& state, uint64_t now) {
                        : state.host == HostState::Asleep       ? "Computer asleep"
                                                                : "Connected, not confirmed";
     const auto dot = !linked(state) ? depleted : alive ? accent : caution;
-    c.rect(16, 38, 288, 1, track);
+    c.rect(16, 38, kContentWidth, 1, track);
     status_dot(c, 16, 59, dot);
     c.text(31, 52, host, font::size12, foreground);
-    c.rect(16, 80, 288, 1, track);
+    c.rect(16, 80, kContentWidth, 1, track);
     provider_status(c, state.providers[0], 0, 96, now);
     provider_status(c, state.providers[1], 1, 142, now);
-    c.rect(16, 182, 288, 1, track);
+    c.rect(16, 182, kContentWidth, 1, track);
     const int w = c.width("Run", font::size11) + c.width("for details", font::size11) +
                   c.width("pipkin status", font::size11) + 12 + 12;
-    int x = 160 - w / 2;
+    int x = kCentre - w / 2;
     c.text(x, 200, "Run", font::size11, secondary);
     x += c.width("Run", font::size11) + 6;
     x += pill(c, x, 207, "pipkin status", foreground) + 6;
@@ -698,7 +767,7 @@ void about(Canvas& c, const State& state, uint64_t now) {
 }
 
 // Animation keys use milliseconds since boot, or since finish for the closing sequence.
-constexpr float kBarLeft = 50, kBarTop = 150, kBarWidth = 220, kBarHeight = 12;
+constexpr float kBarLeft = kCentre - 110, kBarTop = 150, kBarWidth = 220, kBarHeight = 12;
 // Clip Pip behind the bar.
 constexpr int kBarMiddle = 160;
 constexpr float kPipRadius = 22;
@@ -816,7 +885,7 @@ void boot(Canvas& c, const State& state, uint64_t now) {
 
     if (!finishing && !linked(state) && since >= kBootQrMs) {
         constexpr int scale = 3, quiet = 4, size = (setup_qr::kSize + 2 * quiet) * scale;
-        constexpr int left = (kDisplayWidth - size) / 2, top = 8;
+        constexpr int left = (kLayoutWidth - size) / 2, top = 8;
         c.rect(left, top, size, size, 0xffff);
         for (int row = 0; row < setup_qr::kSize; ++row)
             for (int col = 0; col < setup_qr::kSize; ++col)
@@ -826,15 +895,16 @@ void boot(Canvas& c, const State& state, uint64_t now) {
     } else {
         const Key word_in[] = {{160, 0}, {720, 1}};
         const Key word_rise[] = {{160, 6}, {720, 0}};
-        c.coverage_map(160 - wordmark::kWidth / 2,
-                       88 - wordmark::kAscent + static_cast<int>(keyed(t, word_rise) + 0.5f),
+        // The wordmark is rasterized at the panel's scale.
+        c.coverage_map(panel(kCentre) - wordmark::kWidth / 2,
+                       panel(88 + static_cast<int>(keyed(t, word_rise) + 0.5f)) - wordmark::kAscent,
                        wordmark::kWidth, wordmark::kHeight, wordmark::kCoverage,
                        fade(foreground, keyed(t, word_in) * out));
     }
 
     const float x = kBarLeft + width - 14;
     const float y = kBarTop + lift;
-    Canvas behind{c.pixels, c.top, std::min(c.bottom, kBarMiddle)};
+    Canvas behind{c.pixels, c.top, std::min(c.bottom, panel(kBarMiddle))};
     behind.ellipse(x, y, kPipRadius * wide, kPipRadius * tall, fade(pip_body, out));
     if (happy) {
         happy_eye(behind, x - 11, y - 7);
@@ -867,9 +937,9 @@ void boot(Canvas& c, const State& state, uint64_t now) {
                    fade(pip_hand, out));
 
     if (finishing) {
-        twinkle(c, 226, 111, 5, f, 0, sparkle);
-        twinkle(c, 288, 116, 4, f, 150, accent);
-        twinkle(c, 274, 94, 4, f, 300, pip_body);
+        twinkle(c, kBarLeft + 176, 111, 5, f, 0, sparkle);
+        twinkle(c, kBarLeft + 238, 116, 4, f, 150, accent);
+        twinkle(c, kBarLeft + 224, 94, 4, f, 300, pip_body);
     }
 
     const float earlier = finishing ? 1 - std::clamp(f / 160, 0.0f, 1.0f) : 1;
@@ -877,14 +947,14 @@ void boot(Canvas& c, const State& state, uint64_t now) {
     const Key waiting[] = {{2720, 0}, {2960, 1}};
     const Key done[] = {{1520, 0}, {1760, 1}, {3360, 1}, {3680, 0}};
     if (const float a = keyed(t, starting) * earlier; a > 0)
-        c.centered(160, 188, "Starting up", font::size12, fade(secondary, a));
+        c.centered(kCentre, 188, "Starting up", font::size12, fade(secondary, a));
     if (const float a = keyed(t, waiting) * earlier; a > 0)
-        c.centered(160, 188, linked(state) ? "Waiting for usage" : "Looking for your computer",
+        c.centered(kCentre, 188, linked(state) ? "Waiting for usage" : "Looking for your computer",
                    font::size12, fade(secondary, a));
     if (!finishing && since >= kBootHintMs)
-        c.centered(160, 208, setup_hint(state), font::size11, secondary);
+        c.centered(kCentre, 208, setup_hint(state), font::size11, secondary);
     if (const float a = finishing ? keyed(f, done) : 0; a > 0)
-        c.centered(160, 188, "All set", font::size12, fade(secondary, a));
+        c.centered(kCentre, 188, "All set", font::size12, fade(secondary, a));
 }
 
 bool boot_moving(const Boot& b, uint64_t now) {
@@ -912,11 +982,11 @@ void render(const State& state, uint64_t now_ms, uint16_t* pixels, int first_row
     if (!pixels || first_row < 0 || rows <= 0 || rows > kDisplayHeight - first_row)
         return;
     Canvas c{pixels, first_row, first_row + rows};
-    c.rect(0, 0, kDisplayWidth, kDisplayHeight, background);
+    c.fill(0, 0, kDisplayWidth, kDisplayHeight, background);
     if (state.overlay == Overlay::Sleep) {
         clock_text(c, state, now_ms, true);
-        c.centered(160, 104, "Computer asleep", font::size14, foreground);
-        c.centered(160, 128, "Pipkin wakes with it", font::size11, secondary);
+        c.centered(kCentre, 104, "Computer asleep", font::size14, foreground);
+        c.centered(kCentre, 128, "Pipkin wakes with it", font::size11, secondary);
         return;
     }
     if (state.about_open) {
@@ -933,19 +1003,19 @@ void render(const State& state, uint64_t now_ms, uint16_t* pixels, int first_row
     const auto progress = reveal(state, now_ms);
     const bool overview = effective_page(state) == Page::Overview;
     if (!codex && !claude) {
-        c.centered(160, 100, linked(state) ? "Waiting for usage" : "Waiting for your computer",
+        c.centered(kCentre, 100, linked(state) ? "Waiting for usage" : "Waiting for your computer",
                    font::size14, foreground);
-        c.centered(160, 124, setup_hint(state), font::size11, secondary);
+        c.centered(kCentre, 124, setup_hint(state), font::size11, secondary);
     } else if (overview) {
         // Overview has no header; its cards use the full height above the page dots.
         if (codex && claude) {
             provider_row(c, state, 0, 20, false, now_ms, progress);
-            c.rect(16, kOverviewSplit, 288, 1, hairline);
+            c.rect(16, kOverviewSplit, kContentWidth, 1, hairline);
             provider_row(c, state, 1, 126, false, now_ms, progress);
         } else
             provider_row(c, state, codex ? 0 : 1, 56, true, now_ms, progress);
         if (auto status = connection(state))
-            c.right(304, 221, status, font::size11, caution);
+            c.right(kRight, 221, status, font::size11, caution);
     } else
         detail(c, state, now_ms, progress);
     if (codex || claude)

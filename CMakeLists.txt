@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "2.1.0")
+set(PROJECT_VER "2.1.1")
 # -DPIPKIN_DEMO=ON builds the demo reel firmware, which pipkin flash --demo installs.
 option(PIPKIN_DEMO "Build the demo reel firmware" OFF)
 if(PIPKIN_DEMO)
